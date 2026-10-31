@@ -1,0 +1,29 @@
+{
+  "uid": "llmperf",
+  "title": "LLM perf — przegląd",
+  "tags": ["python-llm-perf"],
+  "timezone": "browser",
+  "schemaVersion": 41,
+  "version": 1,
+  "refresh": "5s",
+  "time": {"from": "now-15m", "to": "now"},
+  "panels": [
+    {
+      "id": 1,
+      "type": "text",
+      "title": "Kurs python-llm-perf",
+      "gridPos": {"h": 4, "w": 24, "x": 0, "y": 0},
+      "options": {"mode": "markdown", "content": "Dashboard kursu — panele dodajesz w ćwiczeniach.\n\nŹródła danych: `prometheus`, `tempo`, `loki`, `pyroscope`."}
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Atrapa LLM — odpowiedzi/s wg statusu",
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 4},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"refId": "A", "datasource": {"type": "prometheus", "uid": "prometheus"},
+                   "expr": "sum by (provider, status) (rate(mock_llm_requests_total[30s]))",
+                   "legendFormat": "{{provider}} {{status}}"}]
+    }
+  ]
+}

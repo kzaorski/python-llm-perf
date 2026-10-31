@@ -1,0 +1,93 @@
+# Kurs python-llm-perf — stos: LGTM (Grafana + Prometheus + Tempo + Loki + Pyroscope + OTel Collector),
+# Redis (broker kolejki zadań i cache), atrapa LLM zgodna z Messages API Anthropic, k6 (generator ruchu).
+# Aplikacja FastAPI, wariant gunicorn i worker kolejki działają LOKALNIE (edytujesz je w ćwiczeniach).
+# Uruchamiaj jako projekt `llmperf`: `docker compose up -d --wait`.
+# Wszystkie porty hosta tylko na 127.0.0.1 (tabela portów: README).
+name: llmperf
+
+services:
+  lgtm:
+    image: grafana/otel-lgtm:0.39.0
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${GRAFANA_PORT:-3060}:3000"
+      - "127.0.0.1:${OTLP_GRPC_PORT:-4367}:4317"
+      - "127.0.0.1:${OTLP_HTTP_PORT:-4368}:4318"
+      - "127.0.0.1:${PROMETHEUS_PORT:-9196}:9090"
+      - "127.0.0.1:${PYROSCOPE_PORT:-4060}:4040"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./grafana/prometheus.yaml:/otel-lgtm/prometheus.yaml:ro
+      - ./grafana/dashboards.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/llmperf.yaml:ro
+      - ./grafana/dashboards:/otel-lgtm/dashboards-llmperf:ro
+      - lgtm-data:/data
+    healthcheck:
+      # run-all.sh tworzy /tmp/ready, gdy WSZYSTKIE komponenty (w tym Pyroscope) są gotowe;
+      # w obrazie jest curl (nie ma wget).
+      test: ["CMD-SHELL", "test -f /tmp/ready && curl -fsS http://127.0.0.1:3000/api/health >/dev/null"]
+      interval: 5s
+      timeout: 5s
+      start_period: 120s
+      retries: 40
+
+  redis:
+    image: redis:8.8.4-alpine
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-6460}:6379"
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "512mb", "--maxmemory-policy", "noeviction"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  mock-llm:
+    build: ./mock_llm
+    image: llmperf-mock-llm:1.0
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${MOCK_LLM_PORT:-8061}:8061"
+    environment:
+      # Wartości domyślne atrapy (zmiana w locie: PATCH /admin/config, POST /admin/profile/<nazwa>).
+      MOCK_SEED: ${MOCK_SEED:-20261031}
+      MOCK_TTFT_MEDIAN_MS: ${MOCK_TTFT_MEDIAN_MS:-450}
+      MOCK_TOKENS_PER_S: ${MOCK_TOKENS_PER_S:-250}
+      MOCK_RPM: ${MOCK_RPM:-4000}
+      MOCK_ITPM: ${MOCK_ITPM:-2000000}
+      MOCK_OTPM: ${MOCK_OTPM:-400000}
+      MOCK_CAPACITY: ${MOCK_CAPACITY:-64}
+      MOCK_OVERLOAD_QUEUE: ${MOCK_OVERLOAD_QUEUE:-256}
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8061/health"]
+      interval: 5s
+      timeout: 3s
+      start_period: 20s
+      retries: 20
+
+  # Generator ruchu: `docker compose run --rm k6 run /scripts/smoke.js`
+  # (profil `tools` — nie startuje przy `up`). Metryki → Prometheus (remote write).
+  k6:
+    image: grafana/k6:2.3.0
+    profiles: ["tools"]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      K6_PROMETHEUS_RW_SERVER_URL: http://lgtm:9090/api/v1/write
+      K6_PROMETHEUS_RW_TREND_STATS: "p(50),p(90),p(99),max"
+      K6_PROMETHEUS_RW_PUSH_INTERVAL: 5s
+      K6_NO_USAGE_REPORT: "true"
+      APP_URL: ${K6_APP_URL:-http://host.docker.internal:8060}
+      MOCK_URL: http://mock-llm:8061
+    volumes:
+      - ./k6:/scripts:ro
+      - ./data:/data:ro
+    depends_on:
+      lgtm: { condition: service_healthy }
+
+volumes:
+  lgtm-data:
