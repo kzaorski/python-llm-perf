@@ -34,7 +34,10 @@ M_TOK = Counter("mock_llm_tokens_total", "Tokeny", ["provider", "kind"])
 M_INFLIGHT = Gauge("mock_llm_generating", "Generacje w toku (zajęte sloty mocy)", ["provider"])
 M_WAITING = Gauge("mock_llm_provider_queue", "Żądania czekające na slot mocy dostawcy", ["provider"])
 M_QWAIT = Histogram("mock_llm_provider_queue_wait_seconds", "Czas czekania w kolejce dostawcy", ["provider"],
-                    buckets=(0.001, 0.005, 0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30))
+                    buckets=(0.001, 0.005, 0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60, 120, 300))
+M_CANCEL = Counter("mock_llm_cancelled_total", "Żądania porzucone przez klienta (rozłączenie)",
+                   ["provider", "phase", "stream"])
+M_OLDEST = Gauge("mock_llm_oldest_inflight_seconds", "Wiek najstarszej generacji w toku", ["provider"])
 
 
 class Bucket:
@@ -96,6 +99,16 @@ class Provider:
         self.waiting = 0
         self.cond = asyncio.Condition()
         self.stats: dict[str, int] = {}
+        self.active: dict[str, float] = {}   # msg_id -> monotonic start (generacje w toku)
+
+    def cancelled(self, phase: str, stream: bool):
+        """Klient rozłączył się: w kolejce dostawcy / przed pierwszym tokenem / w trakcie generacji."""
+        key = f"cancelled_{phase}"
+        self.stats[key] = self.stats.get(key, 0) + 1
+        M_CANCEL.labels(self.name, phase, str(stream).lower()).inc()
+
+    def oldest_age(self) -> float:
+        return max((time.monotonic() - t for t in self.active.values()), default=0.0)
 
     def count(self, status: int | str, stream: bool):
         key = str(status)
@@ -116,18 +129,16 @@ class Provider:
         return h
 
     async def acquire_slot(self) -> float:
-        """Czeka na slot mocy dostawcy; zwraca czas czekania [s]."""
+        """Czeka na slot mocy dostawcy; zwraca czas czekania [s].
+
+        `waiting` zwiększa wywołujący (synchronicznie, przed pierwszym `await`), żeby kontrola
+        przeciążenia (529) kolejnych żądań widziała kolejkę od razu; zmniejsza też wywołujący.
+        """
         t0 = time.perf_counter()
         async with self.cond:
-            self.waiting += 1
-            M_WAITING.labels(self.name).set(self.waiting)
-            try:
-                await self.cond.wait_for(lambda: self.generating < max(1, self.cfg.capacity))
-            finally:
-                self.waiting -= 1
-                M_WAITING.labels(self.name).set(self.waiting)
+            await self.cond.wait_for(lambda: self.generating < max(1, self.cfg.capacity))
             self.generating += 1
-            M_INFLIGHT.labels(self.name).set(self.generating)
+        M_INFLIGHT.labels(self.name).set(self.generating)
         w = time.perf_counter() - t0
         M_QWAIT.labels(self.name).observe(w)
         return w
@@ -272,10 +283,28 @@ async def _messages(request: Request, pname: str | None):
     if cfg.slow_ttft_p and rng.random() < cfg.slow_ttft_p:
         ttft += cfg.slow_ttft_ms / 1000.0
     tps = max(1.0, _lognorm(rng, cfg.tokens_per_s, cfg.tokens_per_s_sigma))
+    # długi ogon (wywołania wielominutowe): długi TTFT albo rozciągnięta generacja
+    kind = "short"
+    if cfg.long_p and rng.random() < cfg.long_p:
+        kinds = [k for k, on in (("ttft", cfg.long_ttft_s_max > 0), ("gen", cfg.long_total_s_max > 0)) if on]
+        if kinds:
+            kind = kinds[0] if len(kinds) == 1 else rng.choice(kinds)
+            if kind == "ttft":
+                ttft = rng.uniform(cfg.long_ttft_s_min, cfg.long_ttft_s_max)
+            else:
+                tps = out_tok / max(0.001, rng.uniform(cfg.long_total_s_min, cfg.long_total_s_max))
+    # nadpisanie per żądanie (testy powtarzalne, k6): x-mock-ttft-ms, x-mock-total-s
+    h_ttft, h_total = request.headers.get("x-mock-ttft-ms"), request.headers.get("x-mock-total-s")
+    if h_ttft:
+        ttft, kind = float(h_ttft) / 1000.0, "header"
+    if h_total:
+        tps, kind = out_tok / max(0.001, float(h_total)), "header"
+    stalls = [cfg.stall_p > 0 and rng.random() < cfg.stall_p for _ in range(0, out_tok, max(1, cfg.chunk_tokens))] \
+        if stream and cfg.stall_p > 0 else []
     broken = stream and cfg.stream_error_p and rng.random() < cfg.stream_error_p
     tokens = _text_tokens(json.dumps(body, sort_keys=True).encode(), out_tok)
     msg_id = "msg_mock_" + uuid.uuid4().hex[:24]
-    headers = {"request-id": "req_mock_" + uuid.uuid4().hex[:20]}
+    headers = {"request-id": "req_mock_" + uuid.uuid4().hex[:20], "x-mock-kind": kind}
     headers.update(prov.limit_headers())
     model = body["model"]
     M_TOK.labels(prov.name, "input").inc(in_tok)
@@ -285,10 +314,22 @@ async def _messages(request: Request, pname: str | None):
                 "cache_read_input_tokens": 0}
 
     if not stream:
-        qwait = await prov.acquire_slot()
+        got = await _acquire_or_gone(prov, request)
+        if got is None:
+            prov.cancelled("queue", False)
+            prov.otok.give(max_tokens)
+            return Response(status_code=499)
+        qwait = got
+        prov.active[msg_id] = time.monotonic()
         try:
-            await asyncio.sleep(ttft + out_tok / tps)
+            if await _sleep_or_gone(request, ttft + out_tok / tps):
+                prov.cancelled("generating", False)
+                return Response(status_code=499)
+        except asyncio.CancelledError:
+            prov.cancelled("generating", False)
+            raise
         finally:
+            prov.active.pop(msg_id, None)
             await prov.release_slot()
             prov.otok.give(max_tokens - out_tok)
         M_TOK.labels(prov.name, "output").inc(out_tok)
@@ -303,22 +344,67 @@ async def _messages(request: Request, pname: str | None):
     def sse(event: str, data: dict) -> bytes:
         return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n".encode()
 
+    PING = sse("ping", {"type": "ping"})
+    start_events = [
+        sse("message_start", {"type": "message_start", "message": {
+            "id": msg_id, "type": "message", "role": "assistant", "model": model, "content": [],
+            "stop_reason": None, "stop_sequence": None, "usage": usage(1)}}),
+        sse("content_block_start", {"type": "content_block_start", "index": 0,
+                                    "content_block": {"type": "text", "text": ""}}),
+        PING,
+    ]
+
     async def gen():
         sent = 0
-        await prov.acquire_slot()
+        state = {"gone": False, "phase": "queue"}
+
+        async def pause(secs: float, may_ping: bool):
+            """Czeka `secs`, sprawdzając rozłączenie klienta; w trakcie ciszy wysyła `ping`."""
+            end = time.monotonic() + secs
+            ping = cfg.ping_interval_s if may_ping else 0.0
+            next_ping = time.monotonic() + ping if ping > 0 else math.inf
+            while True:
+                now = time.monotonic()
+                rem = end - now
+                if rem <= 0:
+                    return
+                await asyncio.sleep(min(rem, 0.5, max(0.0, next_ping - now)))
+                if secs >= 0.2 and await request.is_disconnected():
+                    state["gone"] = True
+                    return
+                if time.monotonic() >= next_ping:
+                    next_ping += ping
+                    yield PING
+
+        if await _acquire_or_gone(prov, request) is None:
+            prov.cancelled("queue", True)
+            prov.otok.give(max_tokens)
+            return
+        prov.active[msg_id] = time.monotonic()
+        state["phase"] = "ttft"
         try:
-            await asyncio.sleep(ttft)
-            yield sse("message_start", {"type": "message_start", "message": {
-                "id": msg_id, "type": "message", "role": "assistant", "model": model, "content": [],
-                "stop_reason": None, "stop_sequence": None, "usage": usage(1)}})
-            yield sse("content_block_start", {"type": "content_block_start", "index": 0,
-                                              "content_block": {"type": "text", "text": ""}})
-            yield sse("ping", {"type": "ping"})
+            if cfg.early_start:
+                for ev in start_events:
+                    yield ev
+            async for ev in pause(ttft, cfg.early_start):
+                yield ev
+            if state["gone"]:
+                return
+            if not cfg.early_start:
+                for ev in start_events:
+                    yield ev
+            state["phase"] = "generating"
             step = max(1, cfg.chunk_tokens)
-            for i in range(0, out_tok, step):
+            for n, i in enumerate(range(0, out_tok, step)):
                 part = tokens[i:i + step]
+                if stalls and stalls[n]:
+                    async for ev in pause(cfg.stall_ms / 1000.0, True):
+                        yield ev
                 if i:
-                    await asyncio.sleep(len(part) / tps)
+                    async for ev in pause(len(part) / tps, True):
+                        yield ev
+                if state["gone"]:
+                    return
                 if broken and i >= out_tok // 2:
                     prov.count("stream_error", True)
                     yield sse("error", {"type": "error", "error": {"type": "overloaded_error", "message": "Overloaded"}})
@@ -332,13 +418,63 @@ async def _messages(request: Request, pname: str | None):
                                         "usage": {"output_tokens": out_tok}})
             yield sse("message_stop", {"type": "message_stop"})
             prov.count(200, True)
+            state["phase"] = "done"
+        except (asyncio.CancelledError, OSError):
+            state["gone"] = True
+            raise
         finally:
+            if state["gone"] and state["phase"] != "done":
+                prov.cancelled(state["phase"], True)
+            prov.active.pop(msg_id, None)
             await prov.release_slot()
             prov.otok.give(max_tokens - sent)
             M_TOK.labels(prov.name, "output").inc(sent)
 
     return StreamingResponse(gen(), media_type="text/event-stream",
                              headers={**headers, "cache-control": "no-cache"})
+
+
+async def _sleep_or_gone(request: Request, secs: float) -> bool:
+    """Śpi `secs`; co 0.5 s sprawdza rozłączenie klienta. True = klient się rozłączył."""
+    end = time.monotonic() + secs
+    while (rem := end - time.monotonic()) > 0:
+        await asyncio.sleep(min(rem, 0.5))
+        if secs >= 0.2 and await request.is_disconnected():
+            return True
+    return False
+
+
+async def _acquire_or_gone(prov: "Provider", request: Request) -> float | None:
+    """Czeka na slot mocy dostawcy, ale porzuca czekanie, gdy klient się rozłączy (None)."""
+    if prov.waiting == 0 and prov.generating < max(1, prov.cfg.capacity):
+        # szybka ścieżka bez `await`: slot zajęty natychmiast, więc kontrola przeciążenia
+        # następnych żądań z tej samej paczki widzi go od razu
+        prov.generating += 1
+        M_INFLIGHT.labels(prov.name).set(prov.generating)
+        M_QWAIT.labels(prov.name).observe(0.0)
+        return 0.0
+    prov.waiting += 1  # synchronicznie — patrz Provider.acquire_slot
+    M_WAITING.labels(prov.name).set(prov.waiting)
+    task = asyncio.ensure_future(prov.acquire_slot())
+    try:
+        while True:
+            done, _ = await asyncio.wait({task}, timeout=0.5)
+            if done:
+                return task.result()
+            if await request.is_disconnected():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    return None
+                await prov.release_slot()  # slot przyznany w ostatniej chwili — oddaj
+                return None
+    except asyncio.CancelledError:
+        task.cancel()
+        raise
+    finally:
+        prov.waiting -= 1
+        M_WAITING.labels(prov.name).set(prov.waiting)
 
 
 @app.post("/v1/messages")
@@ -375,6 +511,8 @@ async def health():
 
 @app.get("/metrics")
 async def metrics():
+    for n, p in PROV.items():
+        M_OLDEST.labels(n).set(p.oldest_age())
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
@@ -428,4 +566,5 @@ async def reset(provider: str | None = None):
 @app.get("/admin/stats")
 async def stats():
     return {n: {"responses": p.stats, "generating": p.generating, "waiting": p.waiting,
+                "oldest_inflight_s": round(p.oldest_age(), 2),
                 "limits": p.limit_headers()} for n, p in PROV.items()}

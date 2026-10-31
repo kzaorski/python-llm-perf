@@ -48,7 +48,7 @@ services:
 
   mock-llm:
     build: ./mock_llm
-    image: llmperf-mock-llm:1.0
+    image: llmperf-mock-llm:1.1
     restart: unless-stopped
     ports:
       - "127.0.0.1:${MOCK_LLM_PORT:-8061}:8061"

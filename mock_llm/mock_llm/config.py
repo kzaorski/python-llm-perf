@@ -44,6 +44,16 @@ class ProviderConfig:
     p_529: float = 0.0                  # prawdopodobieństwo 529 overloaded_error na wejściu
     p_500: float = 0.0                  # prawdopodobieństwo 500 api_error na wejściu
     stream_error_p: float = 0.0         # prawdopodobieństwo zdarzenia `error` w połowie strumienia
+    # --- wywołania wielominutowe (ogon długich odpowiedzi; 0 = wyłączone) ---
+    long_p: float = 0.0                 # odsetek żądań z „długiego ogona" (losowane z MOCK_SEED)
+    long_ttft_s_min: float = 0.0        # długi TTFT: cisza przed pierwszym tokenem, U[min,max] s
+    long_ttft_s_max: float = 0.0
+    long_total_s_min: float = 0.0       # długa generacja: łączny czas generowania U[min,max] s
+    long_total_s_max: float = 0.0       #   (tempo tokenów dobierane tak, by trafić w ten czas)
+    stall_p: float = 0.0                # prawdopodobieństwo pauzy przed fragmentem strumienia
+    stall_ms: float = 0.0               # długość pauzy między fragmentami
+    early_start: bool = False           # stream: message_start od razu po przyjęciu, cisza potem
+    ping_interval_s: float = 0.0        # stream: zdarzenia `ping` co N s w trakcie ciszy (0 = brak)
     # --- zgodność z API ---
     reject_sampling_params: bool = True  # modele 5.x: temperature/top_p/top_k → 400
     require_api_key: bool = True
@@ -82,6 +92,20 @@ PROFILES: dict[str, dict] = {
     "wolny-start": {"slow_ttft_p": 0.2, "slow_ttft_ms": 3000},
     # niestabilny dostawca: losowe 529/500 i zerwane strumienie
     "niestabilny": {"p_529": 0.05, "p_500": 0.02, "stream_error_p": 0.03},
+    # --- profile minutowe (wymaganie: wywołania 60–300 s) ---
+    # każde wywołanie: 60–180 s ciszy przed pierwszym tokenem, potem zwykłe tempo
+    "dlugi-ttft": {"long_p": 1.0, "long_ttft_s_min": 60, "long_ttft_s_max": 180},
+    # krótki TTFT, ale generowanie rozciągnięte na 120–300 s (stream lub non-stream)
+    "dlugi-stream": {"long_p": 1.0, "long_total_s_min": 120, "long_total_s_max": 300},
+    # mieszany ruch: 80% krótkich, 20% ogona 60–300 s (połowa ogona = długi TTFT)
+    "mieszany": {"long_p": 0.2, "long_ttft_s_min": 60, "long_ttft_s_max": 180,
+                 "long_total_s_min": 60, "long_total_s_max": 240},
+    # strumień z pauzami: ~2% fragmentów poprzedza 20 s ciszy (test read/idle timeoutu)
+    "pauzy": {"long_p": 1.0, "long_total_s_min": 60, "long_total_s_max": 120,
+              "stall_p": 0.02, "stall_ms": 20000},
+    # jak dlugi-ttft, ale nagłówki i message_start od razu + ping co 15 s (keep-alive)
+    "dlugi-ttft-ping": {"long_p": 1.0, "long_ttft_s_min": 60, "long_ttft_s_max": 180,
+                        "early_start": True, "ping_interval_s": 15},
 }
 
 SEED = _env("MOCK_SEED", 20261031, int)
