@@ -62,6 +62,7 @@ services:
       MOCK_OTPM: ${MOCK_OTPM:-400000}
       MOCK_CAPACITY: ${MOCK_CAPACITY:-64}
       MOCK_OVERLOAD_QUEUE: ${MOCK_OVERLOAD_QUEUE:-256}
+      MOCK_LONG_P: ${MOCK_LONG_P:-0}
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8061/health"]
       interval: 5s
