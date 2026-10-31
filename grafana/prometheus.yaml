@@ -37,7 +37,8 @@ storage:
     # A 10min time window is enough because it can easily absorb retries and network delays.
     out_of_order_time_window: 10m
 
-# --- kurs python-llm-perf: scrapowanie atrapy LLM (kontener) i procesów lokalnych (host) ---
+# --- kurs python-llm-perf: scrapowanie atrapy LLM (kontener) i workera kolejki (host) ---
+# Aplikacja (uvicorn i gunicorn) wysyła metryki przez OTLP (push) — scrape jej nie dotyczy.
 # Reszta pliku = domyślna z obrazu grafana/otel-lgtm:0.39.0. host.docker.internal działa w Docker
 # Desktop (macOS/Windows); na Linuksie zapewnia go `extra_hosts: host-gateway` w compose.
 scrape_configs:
@@ -45,14 +46,6 @@ scrape_configs:
     scrape_interval: 5s
     static_configs:
       - targets: ["mock-llm:8061"]
-  - job_name: app
-    scrape_interval: 5s
-    static_configs:
-      - targets: ["host.docker.internal:8060"]
-  - job_name: app-gunicorn
-    scrape_interval: 5s
-    static_configs:
-      - targets: ["host.docker.internal:8062"]
   - job_name: worker
     scrape_interval: 5s
     static_configs:
