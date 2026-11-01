@@ -53,13 +53,17 @@ tracer = trace.get_tracer("claims-assistant")
 meter = metrics.get_meter("claims-assistant")
 
 
-def konfiguruj(service: str | None = None) -> None:
-    """Ustawia providery OTel (raz na proces). Wołane przy imporcie app.main i w workerze."""
-    global _gotowe, tracer, meter, SERVICE
+def konfiguruj(service: str | None = None, wariant: str | None = None) -> None:
+    """Ustawia providery OTel (raz na proces). Wołane przy imporcie app.main i w workerze.
+
+    `wariant` = domyślna etykieta procesu (np. worker), gdy nie ustawiono APP_WARIANT."""
+    global _gotowe, tracer, meter, SERVICE, WARIANT
     if _gotowe:
         return
     if service:
         SERVICE = service
+    if wariant and "APP_WARIANT" not in os.environ:
+        WARIANT = wariant
     _gotowe = True
     res = Resource.create({"service.name": SERVICE, "service.instance.id": f"{WARIANT}-{os.getpid()}",
                            "app.wariant": WARIANT})

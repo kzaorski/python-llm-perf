@@ -41,7 +41,7 @@ _C_WYKONANE = _H_CZAS = _H_CZEKANIE = None
 @broker.on_event(TaskiqEvents.WORKER_STARTUP)
 async def _start(state: TaskiqState) -> None:
     global _C_WYKONANE, _H_CZAS, _H_CZEKANIE
-    telemetry.konfiguruj(service="claims-worker")
+    telemetry.konfiguruj(service="claims-worker", wariant="worker")
     _C_WYKONANE = telemetry.meter.create_counter("zadania.wykonane", description="Zadania wg wyniku")
     _H_CZAS = telemetry.meter.create_histogram("zadania.czas", unit="s", description="Czas wykonania zadania")
     _H_CZEKANIE = telemetry.meter.create_histogram("zadania.czekanie", unit="s",
