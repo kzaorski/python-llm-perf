@@ -5,7 +5,7 @@
 #   ./smoke.sh szybki     # tylko check.py --all na stanie końcowym (bez k6; ćw. 02/03 użyją starych wyników)
 #
 # Wymaga: `docker compose up -d --wait` (stos llmperf), .venv z requirements.txt, wolnych portów 8060/8062/8063
-# (zatrzymaj własną aplikację, gunicorna, worker i eksporter metryk kolejki). Czas: ~6 min (szybki: ~4 min).
+# (zatrzymaj własną aplikację, gunicorna, worker i eksporter metryk kolejki). Czas: ~7 min (szybki: ~4 min).
 # Na koniec zatrzymuje wszystko, co uruchomił, i resetuje atrapę.
 set -euo pipefail
 cd "$(dirname "$0")"

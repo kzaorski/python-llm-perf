@@ -10,6 +10,11 @@ Instrukcje po polsku.
 > gunicorn 26.2.0 + uvicorn-worker 0.4.0, anthropic 2.3.0 (httpx2 2.16.0), opentelemetry-sdk 1.45.2
 > (instrumentacje 0.66b2), pyroscope-io 1.4.0, taskiq 0.13.0 + taskiq-redis 1.2.4, redis-py 8.1.0,
 > obrazy `grafana/otel-lgtm:0.39.0`, `grafana/k6:2.3.0`, `redis:8.8.4-alpine`, atrapa LLM 1.1 (`python:3.13.18-slim-trixie`).
+> Smoke od zera (2026-11-01, świeży klon, Docker Desktop na macOS, arm64): świeża instalacja na Pythonie **3.11.17**
+> (najniższa obsługiwana) i 3.13.13; pierwszy `docker compose up -d --wait` na pustych wolumenach ~10 s (obrazy
+> w cache, bez pobierania), `pip install` + dane ~20 s; ćw. 01 i 12 (przebiegi 180 s A i B) wykonane dosłownie —
+> liczby zgodne z tabelami; `check.py --all` na szkielecie: 17 × FAIL + SKIP ex17 (bez wyjątków, ~11 min);
+> `./smoke.sh` na rozwiązaniach: 17 × PASS + SKIP ex17 (bez klucza), ~7 min.
 
 Nacisk na teorię i jasne tłumaczenie pojęć — zacznij od `exercises/00-teoria.md`, przed blokami czytaj
 `exercises/NNa-*.md`, definicje w `slownik.md` (hasła z odnośnikami do ćwiczeń).
