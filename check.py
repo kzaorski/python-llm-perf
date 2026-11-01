@@ -4,6 +4,7 @@
     python check.py 06          # jedno ćwiczenie
     python check.py --all       # wszystkie (regresja kursu)
     python check.py 04 06 09    # kilka
+    python check.py ex06        # to samo co 06 (forma z treści ćwiczeń)
 
 Sprawdzamy ZACHOWANIE działającej aplikacji (port 8060), a nie kod: krótkie sondy obciążeniowe (sekundy),
 API atrapy LLM (/admin/stats), Tempo (trace po znanym trace-id), metryki kolejki (8063) i pliki
@@ -527,6 +528,8 @@ def ex17():
         if not os.environ.get("ANTHROPIC_API_KEY"):
             raise Skip("brak wyniki/ex17-porownanie.json i ANTHROPIC_API_KEY — ćwiczenie wymaga klucza (koszt < $0.05)")
         raise Fail("brak wyniki/ex17-porownanie.json — uruchom: python scripts/porownaj_z_claude.py")
+    if "claude" not in r and not os.environ.get("ANTHROPIC_API_KEY"):
+        raise Skip("wyniki/ex17-porownanie.json z trybu --tylko-atrapa (bez sekcji claude) — część z Claude opcjonalna")
     oczekuj("claude" in r and "atrapa" in r, "plik nie zawiera sekcji claude i atrapa")
     return f"TTFT p50: claude {r['claude'].get('ttft_p50_s')} s, atrapa {r['atrapa'].get('ttft_p50_s')} s"
 
@@ -558,7 +561,7 @@ def main() -> int:
     if not args or args == ["-h"] or args == ["--help"]:
         print(__doc__)
         return 0
-    wybrane = list(CWICZENIA) if "--all" in args else [a.zfill(2) for a in args]
+    wybrane = list(CWICZENIA) if "--all" in args else [a.lower().removeprefix("ex").zfill(2) for a in args]
     zle = 0
     for nr in wybrane:
         f = CWICZENIA.get(nr)
