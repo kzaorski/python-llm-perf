@@ -30,17 +30,20 @@ pojedynczą prośbę przy małym ruchu i wsady przy dużym, i dobierasz parametr
    curl -s -w '  [%{time_total} s]\n' -X POST 127.0.0.1:8060/claims/7/priority
    seq 30 | xargs -P 30 -I{} curl -s -X POST 127.0.0.1:8060/claims/{}/priority | python -c "import sys,json; r=[json.loads(l) for l in sys.stdin.read().replace('}{','}\n{').splitlines() if l.strip()]; print('odpowiedzi', len(r), 'rozmiary wsadów', sorted({x['rozmiar_wsadu'] for x in r}), 'czekanie max ms', max(x['czekanie_na_wsad_ms'] for x in r))"
    ```
-   Prometheus:
+   Prometheus — średni rozmiar wsadu od startu procesu (histogram jest liczony od uruchomienia aplikacji;
+   `rate()`/`increase()` po świeżym restarcie nie policzą pierwszej serii próbek, a kwantyl z kilku wsadów to
+   tylko interpolacja kubełków):
    ```
-   histogram_quantile(0.5, sum by (le) (rate(app_batch_size_bucket[2m])))
-   histogram_quantile(0.99, sum by (le) (rate(app_batch_size_bucket[2m])))
+   sum(app_batch_size_sum) / sum(app_batch_size_count)
    ```
-   ⟨E16-PRZED⟩
+   U mnie: pojedyncza prośba **2.56 s** (`czekanie_na_wsad_ms` 2001.6 — całe okno), 30 równoczesnych → jeden
+   wsad **30**, czekanie max 2002 ms; średni wsad 15.5.
 4. W Tempo otwórz ślad jednej prośby: ile z czasu to czekanie na wsad, ile `llm.call`?
 5. **Dobór parametrów (W11).** W **`app/wsad.py`** (`TODO ćw. 16`) zmień `OKNO_S` i `MAX_WSAD`. Kryteria:
    pojedyncza prośba < 1.2 s (okno nie może dominować latencji), przy ruchu ~20–30 próśb/s wsad > 1 (bo inaczej
    batching nic nie daje) i mały (krótka generacja). Policz z Little'a, ile zgłoszeń zbierze okno 50 ms przy 30/s.
-6. Restart, powtórka kroku 3. ⟨E16-PO⟩
+6. Restart, powtórka kroku 3. U mnie: pojedyncza **0.79 s** (czekanie na wsad 53 ms), 30 równoczesnych →
+   wsady **14 i 16**, czekanie max 50 ms; `check.py ex16`: pojedyncza 0.60 s, wsad max 16.
 
    U mnie (okno 2 s / wsad 100 → 50 ms / 16): pojedyncza prośba **2.78 s → 0.54 s**; ruch otwarty 30/s × 10 s:
    wsady ~60, 5 wywołań, p99 4.50 s → wsady p50 2 / max 5, 146 wywołań, p99 1.14 s.

@@ -43,12 +43,15 @@ najstarsze**, a współbieżność workera musi wynikać z mocy dostawcy, a nie 
    ID=$(curl -s -X POST 127.0.0.1:8060/claims/7/summary/async | python -c 'import json,sys; print(json.load(sys.stdin)["zadanie"])')
    curl -s 127.0.0.1:8060/jobs/$ID
    ```
-   W Prometheusie (po ~10 s):
+   W Prometheusie (po ~10 s; licznik workera liczy od jego startu, więc patrz na wartość, nie na `increase()` —
+   seria rodzi się od razu z pełną wartością i `increase` pokazuje 0):
    ```
-   sum by (wynik) (increase(zadania_wykonane_total[5m]))
+   sum by (wynik) (zadania_wykonane_total)
    kolejka_xlen
    ```
-   ⟨E14-PRZED⟩
+   U mnie: wszystkie 201 zadań rozstrzygnięte w ~2 s — **170 × `OverloadedError`** (529) i 31 × `ok`; ostatnie
+   zadanie: `"stan": "blad"`. `kolejka_xlen` 380 → 418 → 581 w kolejnych odczytach i nigdy nie maleje (liczy też
+   wpisy z wcześniejszych przebiegów).
 4. **Metryki kolejki.** W **`app/kolejka_metryki.py`** (`TODO ćw. 14`) dodaj gauge `kolejka_lag`,
    `kolejka_pending`, `kolejka_wiek_najstarszego_s` (i opcjonalnie `kolejka_wiek_najstarszego_pending_s`):
    `XINFO GROUPS` → `lag`, `pending`, `last-delivered-id`; pierwszy wpis po `last-delivered-id` (`XRANGE`

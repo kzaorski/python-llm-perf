@@ -37,7 +37,8 @@ strumień jest buforowany, i naprawiasz je. Przy okazji: dlaczego k6 tego nie wi
    python scripts/strumien_ttft.py -n 20 -c 5
    docker compose run --rm k6 run -o experimental-prometheus-rw /scripts/strumien.js -e RATE=2 -e CZAS=30s
    ```
-   ⟨E13-PRZED⟩
+   U mnie: `strumien_ttft.py` — 20 strumieni: TTFT klienta p50 **2.76 s** (max 3.81 s), całość p50 2.76 s,
+   **TTFT/całość 100%**; k6: `http_req_waiting` p50 **3 ms** (nagłówki), `klient_calosc` p50 2.69 s.
 4. Prometheus — dwa TTFT obok siebie:
    ```
    histogram_quantile(0.5, sum by (le) (rate(app_stream_first_chunk_seconds_bucket[2m])))
@@ -47,7 +48,9 @@ strumień jest buforowany, i naprawiasz je. Przy okazji: dlaczego k6 tego nie wi
 5. Otwórz **`app/strumien.py`** (`TODO ćw. 13`). Wysyłaj każdy fragment od razu (`yield sse("delta", …)`
    w pętli `async for`), wołaj `pierwszy_fragment(czasy, t0)` przy pierwszym fragmencie, a co ~20 fragmentów
    sprawdzaj `await request.is_disconnected()` i kończ (`wynik = "anulowane"`).
-6. Restart, powtórka kroków 3–4. ⟨E13-PO⟩
+6. Restart, powtórka kroków 3–4. U mnie: `strumien_ttft.py` — TTFT klienta p50 **0.49 s** (max 0.74 s), całość
+   p50 2.54 s, **TTFT/całość 19%**; k6 `http_req_waiting` bez zmian (2–3 ms) — k6 różnicy nie widzi.
+   (Zapytanie z oknem `[2m]` tuż po przebiegu „przed” miesza oba — odczekaj 2 min.)
 
    U mnie (harness, 20 strumieni po 5 naraz): pierwszy fragment u klienta p50 **2.19 s = 100% całości** →
    **0.55 s = 19%** całości (2.89 s).

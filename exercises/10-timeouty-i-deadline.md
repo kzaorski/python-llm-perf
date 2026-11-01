@@ -83,7 +83,9 @@ while true; do curl -s 127.0.0.1:8061/admin/stats | python -c "import json,sys; 
    curl -s 127.0.0.1:8060/diag | python -m json.tool | head -12      # po ~30 s: sloty, kolejka
    wait; sort -k2 -n w6.txt | tail -3
    ```
-   ⟨E10-W6-PRZED⟩
+   U mnie (dokładnie te polecenia): po ~30 s `/diag` → `krotkie`: **32 w toku, 28 czeka**, najstarsze 23.5 s;
+   60 × 200 po 120.3–220.8 s (p50 120.8 s), ostatnia **po 258 s** od startu pętli; atrapa: 32 generacje naraz,
+   `mock_llm_cancelled_total` bez przyrostu.
 
 ### Naprawa
 6. **`app/llm/klient.py`** — timeouty z SLO, nie „na zapas”:
@@ -96,7 +98,9 @@ while true; do curl -s 127.0.0.1:8061/admin/stats | python -c "import json,sys; 
    (co 0.5 s `request.is_disconnected()` → anuluj pracę → `bledy.Anulowane`). `request` bywa `None`
    (worker kolejki, wsady).
 8. Restart (`LLM_FALLBACK=0`) i powtórka A, B, C (przed A znów `PATCH … early_start/ping`).
-   ⟨E10-W6-PO⟩
+   U mnie, powtórka C dokładnie poleceniem z kroku 5: **60 × 504 po 15.0–15.1 s**, ostatnia po 54 s od startu
+   pętli (30 s wysyłania + 15 s + narzut curl); atrapa: **59 × `cancelled_generating`** (60. przerwana chwilę
+   później); `/diag` → `klienci`: krótkie `max_retries` 0, read 15 s; długie `max_retries` 0, read 60 s. ⟨E10-AB-PO⟩
 
    U mnie:
 
@@ -119,7 +123,9 @@ while true; do curl -s 127.0.0.1:8061/admin/stats | python -c "import json,sys; 
 
 ## Pytania kontrolne
 1. Ustawiłeś klientowi długich `timeout=330`. Dlaczego to nie jest deadline 330 s?
-2. W scenariuszu C po naprawie odpowiedzi przychodzą po 15–25 s, choć read timeout to 15 s. Skąd do 10 s więcej?
+2. W pomiarze z tabeli (scenariusz C po naprawie) odpowiedzi przychodziły po 15–25 s, choć read timeout to 15 s
+   (w moim powtórzeniu poleceniem z kroku 5 — równo po 15.0 s). Skąd mogą pochodzić dodatkowe sekundy i od
+   czego zależy, czy się pojawią?
 3. Dlaczego wyjątek timeoutu w trakcie strumienia trzeba łapać osobno i jak to wpływa na ponowienia z ćw. 9?
 
 Odpowiedzi: `solutions/pytania_odpowiedzi.md`.

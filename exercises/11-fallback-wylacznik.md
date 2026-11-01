@@ -38,13 +38,18 @@ na jakiś czas, potem sprawdzamy go pojedynczą próbką.
    docker compose run --rm -e WYNIK=ex11-przed k6 run -o experimental-prometheus-rw /scripts/otwarty.js -e RATE=2 -e CZAS=40s
    curl -s 127.0.0.1:8061/admin/stats | python -m json.tool | head -30
    ```
-   ⟨E11-PRZED⟩ Prometheus: `sum by (provider) (increase(mock_llm_requests_total[2m]))`.
+   U mnie: 71 × 200 (wszystkie z `b`), p50 **16.1 s** (15 s read timeout `a` + wywołanie `b`); atrapa: `a` —
+   **71 × `cancelled_generating`** (każde żądanie najpierw czekało na `a`), `b` — 71 × 200. Prometheus:
+   `sum by (provider) (increase(mock_llm_requests_total[2m]))` liczy tylko odpowiedzi dokończone (`a` = 0,
+   `b` ≈ 74), więc próby do `a` zobaczysz w `sum by (provider) (increase(mock_llm_cancelled_total[2m]))`.
 4. Otwórz **`app/llm/fallback.py`** (`TODO ćw. 11`). Dopisz klasę wyłącznika (stan, licznik kolejnych
    awarii, czas otwarcia, flaga „próbka w toku”) i użyj jej w `wywolaj()`: pytaj `a` tylko, gdy
    wyłącznik pozwala; sukces → zamknij; awaria (`_awaria(e)`) → policz; inny błąd → przepuść dalej.
    Ustaw atrybut `llm.cb.stan` na bieżącym spanie i zapisuj przejścia stanów do `stan.WYNIKI`
    (`("cb", "a", "zamkniety->otwarty")`) — zobaczysz je w `/diag`. Progi: 5 awarii, 30 s otwarcia.
-5. Restart aplikacji, ponownie `PATCH` z kroku 2, powtórka kroku 3 z `-e WYNIK=ex11-po`. ⟨E11-PO⟩
+5. Restart aplikacji, ponownie `PATCH` z kroku 2, powtórka kroku 3 z `-e WYNIK=ex11-po`. U mnie: 73 × 200,
+   p50 **1.31 s** (p90 16.1 s — tylko żądania sprzed otwarcia wyłącznika); do `a` trafiło **28** (przerwane),
+   w `/diag` jedno przejście `zamkniety->otwarty`; `check.py ex11`: mediana 1.05 s, do `a` 1/80.
    W `/diag` → `wyniki` szukaj wpisów `endpoint: "cb"`. W Tempo:
    ```
    {span.llm.cb.stan="otwarty"}

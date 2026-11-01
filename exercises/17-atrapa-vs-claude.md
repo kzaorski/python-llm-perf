@@ -30,7 +30,9 @@ tempa tokenów i nagłówki limitów — i sprawdzasz, czy liczby z ćw. 03 i 06
    python scripts/porownaj_z_claude.py --tylko-atrapa -n 3
    ```
    Skrypt wysyła strumieniem po n zadań trzech typów (klasyfikacja max 16 tokenów, streszczenie 200, odpowiedź
-   700) i zapisuje `wyniki/ex17-porownanie.json`. ⟨E17-ATRAPA⟩
+   700) i zapisuje `wyniki/ex17-porownanie.json`. U mnie (n = 3): TTFT p50 0.5 s; klasyfikacja 0.47 / 0.52 s
+   (TTFT / całość), streszczenie 0.59 / 1.35 s (214 tok/s), odpowiedź 0.49 / 2.22 s (216 tok/s); szacowany koszt
+   tych tokenów w cenniku Haiku $0.00085 (atrapa nic nie kosztuje — to przelicznik). `check.py ex17` → SKIP.
 2. **Hipoteza (zapisz):** TTFT p50 i tempo tokenów/s na prawdziwym Claude — większe czy mniejsze niż na atrapie?
    Który typ zadania będzie miał największą względną różnicę czasu całkowitego?
 3. **(Opcjonalnie, koszt ≈ $0.005)** z kluczem — tylko w bieżącej powłoce, nigdy w repo:

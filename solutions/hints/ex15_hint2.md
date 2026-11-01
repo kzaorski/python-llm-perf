@@ -5,5 +5,5 @@
 - Między procesami: `await r.set(k + ":blokada", "1", nx=True, px=30_000)` — kto nie zdobył, odpytuje `r.get(k)`
   co 50 ms.
 - Licznik: `telemetry.zapisz(telemetry.C_CACHE, 1, wynik="wspolne")`; zapytanie
-  `sum by (wynik) (increase(app_cache_total[2m]))`.
+  `sum by (wynik) (app_cache_total)` (licznik od startu procesu — po świeżym restarcie `increase()` gubi pierwszą serię).
 - Błąd właściciela: `fut.set_exception(e)` — inaczej czekający wiszą.

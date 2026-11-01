@@ -36,14 +36,17 @@ za każdym razem, gdy klucz wygaśnie. Mierzysz stampede liczbą wywołań LLM i
    A1=$(curl -s 127.0.0.1:8061/admin/stats | python -c 'import json,sys; d=json.load(sys.stdin); print(d["a"]["responses"].get("200",0)+d["b"]["responses"].get("200",0))')
    echo "wywołań LLM: $((A1 - A0))"
    ```
-   Prometheus: `sum by (wynik) (increase(app_cache_total[2m]))`. ⟨E15-PRZED⟩
+   Prometheus: `sum by (wynik) (app_cache_total)` — licznik od startu procesu (po świeżym restarcie
+   `increase()` nie policzy pierwszej serii próbek, więc tu patrz na wartości). U mnie: atrapa — **50 wywołań
+   LLM**, 50 × 200 dla klientów; `app_cache_total{wynik="miss"}` = 50.
 4. W Tempo znajdź kilka śladów `GET /faq` z tego samego momentu: każdy ma własny `llm.call`?
 5. **Single-flight (W10).** W **`app/cache.py`** (`TODO ćw. 15`) w `pobierz_albo_policz()`:
    - po chybieniu sprawdź słownik `_w_toku[k]`; jeśli jest — `await asyncio.shield(fut)` i zwróć `"wspolne"`;
    - w przeciwnym razie utwórz `Future`, wstaw do słownika, zdobądź blokadę `r.set(k + ":blokada", "1", nx=True,
      px=…)`, policz, zapisz, ustaw wynik `Future` (albo wyjątek), w `finally` usuń wpis i blokadę;
    - kto nie zdobył blokady (inny proces liczy) — odpytuje cache co ~50 ms.
-6. Restart, powtórka kroku 3 z nowym `Q`. ⟨E15-PO⟩
+6. Restart, powtórka kroku 3 z nowym `Q`. U mnie: 50 × 200, **1 wywołanie LLM**; `app_cache_total`:
+   `miss` 1, `wspolne` 49.
 
    U mnie: **50 wywołań LLM** (p99 4.6 s) → **1 wywołanie** (49 „wspólne”), p99 1.32 s.
 7. `python check.py ex15`

@@ -94,9 +94,11 @@ inne w szczegółach — ważny jest kierunek i rząd wielkości.
 1. Timeout SDK jest per operacja (connect/read/write/pool), a read to czas ciszy między bajtami. Strumień,
    który co kilka sekund przysyła token (albo `ping`), może trwać dowolnie długo — 330 s „read” nigdy nie
    wygaśnie. Deadline to limit całkowity: `asyncio.timeout()` wokół całego wywołania.
-2. Czas od przyjęcia żądania do startu wywołania: czekanie na slot. Przy 2/s i 15 s trzymania slotu L ≈ 30 przy
-   32 slotach — w chwilach zagęszczenia część żądań czeka na zwolnienie slotu przez wcześniejsze zawieszone
-   wywołanie. Read 15 s liczy się dopiero od wysłania żądania do dostawcy.
+2. Read 15 s liczy się dopiero od wysłania żądania do dostawcy; wcześniej żądanie może czekać na slot
+   (semafor) i w limiterze tempa. Przy 2/s i 15 s trzymania slotu L ≈ 30 przy 32 slotach — gdy zawieszone
+   wywołania z wcześniejszych sekund jeszcze trzymają sloty (albo równolegle idzie inny ruch), część żądań
+   czeka na slot i dostaje 504 później. W moim powtórzeniu (sam ten ruch, 32 sloty) czekania nie było — wszystkie
+   504 po 15.0 s; dodatkowe sekundy pojawiają się, gdy L zbliża się do liczby slotów.
 3. W strumieniu SDK zgłasza surowy `httpx2.ReadTimeout`, nie `anthropic.APITimeoutError`. Lista wyjątków
    ponawianych/klasyfikowanych musi go znać — inaczej trafi do ogólnego „błąd dostawcy” albo, co gorsza,
    zostanie ponowiony przez ogólną regułę (`except Exception`), mnożąc wielominutowe generacje.
