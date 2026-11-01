@@ -8,7 +8,8 @@
 // TTFT 1–5 s. Krótkie: domyślny profil atrapy (~1.6 s). Timeout k6: krótkie 400 s, długie 400 s —
 // celowo powyżej deadline'ów aplikacji, żeby mierzyć aplikację, a nie cierpliwość k6.
 // Raport: czasy z Server-Timing per klasa (app_czekanie_*, app_ttft_*, app_total_*), statusy per klasa,
-// osiągnięte tempo i dropped_iterations; zaległość po końcu dopływu — scripts/pomiar.py (próbkuje /diag).
+// osiągnięte tempo i dropped_iterations; gracefulStop 420 s — k6 NIE przerywa żądań w toku po końcu dopływu
+// (domyślne 30 s zerwałoby wielominutowe żądania i zafałszowało pomiar zaległości); zaległość po końcu dopływu — scripts/pomiar.py (próbkuje /diag).
 import http from 'k6/http';
 import exec from 'k6/execution';
 import { APP, zapisz, podsumowanie, rng } from './lib.js';
@@ -24,9 +25,9 @@ const SEED = parseInt(__ENV.SEED || '20261101');
 export const options = {
   scenarios: {
     krotkie: { executor: 'constant-arrival-rate', rate: Math.round(KR * 60), timeUnit: '1m', duration: CZAS,
-               preAllocatedVUs: 50, maxVUs: 3000, exec: 'krotkie' },
+               preAllocatedVUs: 300, maxVUs: 3000, exec: 'krotkie', gracefulStop: '420s' },
     dlugie: { executor: 'constant-arrival-rate', rate: Math.round(DL * 60), timeUnit: '1m', duration: CZAS,
-              preAllocatedVUs: 20, maxVUs: 500, exec: 'dlugie' },
+              preAllocatedVUs: 100, maxVUs: 500, exec: 'dlugie', gracefulStop: '420s' },
   },
   tags: { scenariusz: 'mieszany' },
   summaryTrendStats: ['avg', 'p(50)', 'p(90)', 'p(99)', 'max', 'count'],

@@ -14,7 +14,7 @@ const calosc = new Trend('klient_calosc', true);
 export const options = {
   scenarios: {
     strumien: { executor: 'constant-arrival-rate', rate: parseInt(__ENV.RATE || '2'), timeUnit: '1s',
-                duration: __ENV.CZAS || '30s', preAllocatedVUs: 20, maxVUs: 200 },
+                duration: __ENV.CZAS || '30s', preAllocatedVUs: 20, maxVUs: 200, gracefulStop: '130s' },
   },
   tags: { cwiczenie: '13' },
   summaryTrendStats: ['avg', 'p(50)', 'p(90)', 'p(99)', 'max', 'count'],

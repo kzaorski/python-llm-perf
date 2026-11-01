@@ -11,7 +11,7 @@ const SCIEZKA = __ENV.SCIEZKA || 'summary';
 export const options = {
   scenarios: {
     gunicorn: { executor: 'constant-arrival-rate', rate: parseInt(__ENV.RATE || '20'), timeUnit: '1s',
-                duration: __ENV.CZAS || '60s', preAllocatedVUs: 50, maxVUs: 3000 },
+                duration: __ENV.CZAS || '60s', preAllocatedVUs: 200, maxVUs: 3000, gracefulStop: '420s' },
   },
   tags: { cwiczenie: '07', wariant: __ENV.WARIANT || 'nieznany' },
   summaryTrendStats: ['avg', 'p(50)', 'p(90)', 'p(99)', 'max', 'count'],

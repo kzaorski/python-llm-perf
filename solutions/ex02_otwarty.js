@@ -15,7 +15,7 @@ export const options = {
     // ćw. 02 (W14) ✅: constant-arrival-rate = model otwarty. preAllocatedVUs/maxVUs ≥ RATE × najgorszy
     // czas odpowiedzi (Little: L = λ·W), inaczej k6 sam „zamyka" model i gubi iteracje (dropped_iterations).
     otwarty: { executor: 'constant-arrival-rate', rate: RATE, timeUnit: '1s', duration: __ENV.CZAS || '60s',
-               preAllocatedVUs: Math.max(10, RATE * 10), maxVUs: Math.max(200, RATE * 60) },
+               preAllocatedVUs: Math.max(10, RATE * 10), maxVUs: Math.max(200, RATE * 60), gracefulStop: '130s' },
   },
   tags: { model: 'otwarty', cwiczenie: '02' },
   summaryTrendStats: ['avg', 'p(50)', 'p(90)', 'p(99)', 'max', 'count'],

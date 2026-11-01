@@ -23,7 +23,7 @@ for (let r = OD; r <= DO; r += SKOK) {
 export const options = {
   scenarios: {
     rampa: { executor: 'ramping-arrival-rate', startRate: OD, timeUnit: '1s', stages,
-             preAllocatedVUs: 50, maxVUs: 2000 },
+             preAllocatedVUs: 200, maxVUs: 2000, gracefulStop: '130s' },
   },
   tags: { model: 'otwarty', scenariusz: 'rampa', cwiczenie: '03' },
   summaryTrendStats: ['avg', 'p(50)', 'p(90)', 'p(99)', 'max', 'count'],

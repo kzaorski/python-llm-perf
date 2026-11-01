@@ -14,7 +14,7 @@ const PAUZA_S = parseFloat(__ENV.PAUZA_S || '1');
 
 export const options = {
   scenarios: {
-    zamkniety: { executor: 'constant-vus', vus: VUS, duration: __ENV.CZAS || '60s' },
+    zamkniety: { executor: 'constant-vus', vus: VUS, duration: __ENV.CZAS || '60s', gracefulStop: '130s' },
   },
   tags: { model: 'zamkniety', cwiczenie: '02' },
   summaryTrendStats: ['avg', 'p(50)', 'p(90)', 'p(99)', 'max', 'count'],

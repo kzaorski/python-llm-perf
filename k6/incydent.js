@@ -14,13 +14,13 @@ const PYTANIA = ['jak zgłosić szkodę z OC sprawcy', 'ile trwa likwidacja szko
 export const options = {
   scenarios: {
     streszczenia: { executor: 'constant-arrival-rate', rate: 8, timeUnit: '1s', duration: CZAS,
-                    preAllocatedVUs: 50, maxVUs: 3000, exec: 'streszczenie' },
+                    preAllocatedVUs: 300, maxVUs: 3000, exec: 'streszczenie', gracefulStop: '150s' },
     strumien: { executor: 'constant-arrival-rate', rate: 1, timeUnit: '1s', duration: CZAS,
-                preAllocatedVUs: 5, maxVUs: 300, exec: 'strumien' },
+                preAllocatedVUs: 50, maxVUs: 300, exec: 'strumien', gracefulStop: '150s' },
     faq: { executor: 'constant-arrival-rate', rate: 5, timeUnit: '1s', duration: CZAS,
-           preAllocatedVUs: 10, maxVUs: 1000, exec: 'faq' },
+           preAllocatedVUs: 100, maxVUs: 1000, exec: 'faq', gracefulStop: '150s' },
     analizy: { executor: 'constant-arrival-rate', rate: 6, timeUnit: '1m', duration: CZAS,
-               preAllocatedVUs: 5, maxVUs: 100, exec: 'analiza' },
+               preAllocatedVUs: 20, maxVUs: 100, exec: 'analiza', gracefulStop: '150s' },
   },
   tags: { scenariusz: 'incydent' },
   summaryTrendStats: ['avg', 'p(50)', 'p(90)', 'p(99)', 'max', 'count'],
