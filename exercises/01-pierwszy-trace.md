@@ -71,9 +71,10 @@ histogram czekania. Na tym pomiarze stoją wszystkie kolejne ćwiczenia.
 8. Zrestartuj aplikację (Ctrl+C w T1, ponownie `uvicorn …`) i powtórz pętlę z kroku 6. W Tempo:
    ```
    {name="llm.queue_wait"}
-   {span.llm.queue.wait_ms > 100}
+   {span.llm.queue.wait_ms > 100.0}
    ```
-   Drugie zapytanie zwraca żądania, które czekały dłużej niż 100 ms — w trace dziura jest teraz
+   Drugie zapytanie zwraca żądania, które czekały dłużej niż 100 ms (atrybut jest liczbą zmiennoprzecinkową —
+   TraceQL porównuje typy, więc `> 100` bez `.0` nie zwróci nic) — w trace dziura jest teraz
    spanem `llm.queue_wait`, a obok niego (nie pod nim) leży `llm.call`.
 9. **Explore → Prometheus** (RED + czekanie; metryki wysyłane co 5 s — odczekaj chwilę):
    ```

@@ -48,7 +48,7 @@ niezależnych usterek; każda ma własny, rozróżnialny sygnał (sprawdzone pom
    **Po końcu dopływu:** czy `llm_inflight{klasa="dlugie"}` i `mock_llm_generating` spadają do 0 od razu?
 4. Diagnoza — dla każdego obszaru poszukaj sygnału i zapisz liczbę (nie ma tu podpowiedzi, które wady są w środku):
    - czekanie na slot vs czas wywołania (ćw. 01, 03, 06): histogram `llm_queue_wait_seconds` per klasa, ślady
-     z `llm.queue.wait_ms > 100`;
+     z `{span.llm.queue.wait_ms > 100.0}` (atrybut jest liczbą zmiennoprzecinkową — `> 100` bez `.0` nic nie znajdzie);
    - strumień od strony klienta vs od strony dostawcy (ćw. 13): `app_stream_first_chunk_seconds` vs `llm_ttft_seconds`;
    - FAQ i cache (ćw. 15): `sum by (wynik) (increase(app_cache_total[5m]))` a liczba wywołań LLM dla FAQ;
    - porzucone żądania i praca „do nikogo” (ćw. 10, 12): `sum by (phase) (increase(mock_llm_cancelled_total[10m]))`,
