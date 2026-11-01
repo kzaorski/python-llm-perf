@@ -45,8 +45,9 @@ case "${1:-}" in
     $PY scripts/nakladka.py --do "$DO" ${WADY:+--wady "$WADY"} --cel "$CEL" >/dev/null
     curl -s -X POST 127.0.0.1:8061/admin/reset >/dev/null
     curl -s -X POST "127.0.0.1:8061/admin/profile/$PROFIL" >/dev/null
-    (cd "$CEL" && env ${ENVS:-} APP_WARIANT="incydent-$NAZWA" nohup ../../.venv/bin/uvicorn app.main:app --port 8060 --no-access-log \
-      > ../logs/incydent.log 2>&1 & echo $! > ../incydent.pid)
+    (cd "$CEL" && exec env ${ENVS:-} APP_WARIANT="incydent-$NAZWA" ../../.venv/bin/uvicorn app.main:app --port 8060 \
+      --no-access-log) > .run/logs/incydent.log 2>&1 &
+    echo $! > "$PIDF"
     for _ in $(seq 1 100); do curl -fsS 127.0.0.1:8060/diag/ping >/dev/null 2>&1 && break; sleep 0.2; done
     echo "incydent '$NAZWA' działa na :8060 (pid $(cat $PIDF)). Teraz: ./incydent.sh ruch — i do Grafany: http://127.0.0.1:3060"
     ;;

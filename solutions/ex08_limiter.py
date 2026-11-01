@@ -117,25 +117,15 @@ _ZADANIA = Kubelek()        # żądania / min (RPM)
 _TOKENY_WYJ = Kubelek()     # tokeny wyjścia / min (OTPM) — dostawca rezerwuje max_tokens na starcie
 _pauza_do = 0.0             # po 429: wszyscy czekają do retry-after
 _kolejnosc = asyncio.Lock()  # FIFO: kto pierwszy czekał, ten pierwszy dostaje token
-_sonda_wyslana = False
-_poznano_limity = asyncio.Event()
 
 
 async def tempo(klasa: str, max_tokens: int) -> None:
     """ćw. 08 (W4): czekaj, aż limity dostawcy pozwolą na wywołanie — zamiast zbierać 429.
 
-    Przed pierwszą odpowiedzią limitów nie znamy: pierwsze żądanie idzie jako sonda nagłówków,
-    reszta czeka na nie (max 10 s) — inaczej pierwsza fala ruchu i tak trafiłaby w 429.
+    Limity poznajemy z nagłówków pierwszych odpowiedzi (do tego czasu nie ograniczamy — pierwszą falę
+    i tak trzyma pula slotów). Nie czekamy na „sondę": odpowiedź bez strumienia niesie nagłówki dopiero
+    po całej generacji, więc czekanie na nią zatrzymałoby start każdego procesu (zmierzone: +2.1 s).
     """
-    global _sonda_wyslana
-    if not _poznano_limity.is_set():
-        if not _sonda_wyslana:
-            _sonda_wyslana = True
-            return
-        try:
-            await asyncio.wait_for(_poznano_limity.wait(), 10.0)
-        except TimeoutError:
-            _poznano_limity.set()       # dostawca nie podaje limitów — nie ograniczamy
     async with _kolejnosc:
         while True:
             czekaj = max(_pauza_do - time.monotonic(), _ZADANIA.czas_do(1), _TOKENY_WYJ.czas_do(max_tokens))
@@ -154,7 +144,6 @@ def aktualizuj_z_naglowkow(status: int, naglowki) -> None:
         poz = naglowki.get(f"anthropic-ratelimit-{nazwa}-remaining")
         if lim and poz:
             kubelek.synchronizuj(int(lim), int(poz))
-            _poznano_limity.set()
     if status == 429:
         ra = naglowki.get("retry-after")
         _pauza_do = max(_pauza_do, time.monotonic() + (float(ra) if ra else 1.0))

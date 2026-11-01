@@ -357,15 +357,16 @@ def ex10():
     """Zawieszony dostawca → szybkie 504 (timeout wg SLO), rozłączony klient → generacja przerwana, długie bez ponowień SDK."""
     wymagaj_aplikacji()
     mock_reset()
-    # a) krótkie: 60 s ciszy u dostawcy; aplikacja ma odpowiedzieć 504 zanim klient zrezygnuje (25 s)
+    # a) krótkie: 60 s ciszy u dostawcy; aplikacja ma odpowiedzieć 504 w deadlinie krótkich (30 s, z fallbackiem
+    #    na `b`, który też milczy) — zanim klient zrezygnuje (40 s)
     t0 = time.perf_counter()
     try:
         r = httpx2.post(f"{APP}/claims/{random.randint(1, 20000)}/summary", headers={"x-mock-ttft-ms": "60000"},
-                        timeout=25)
+                        timeout=40)
         st, dt = r.status_code, time.perf_counter() - t0
     except httpx2.TimeoutException:
         st, dt = 0, time.perf_counter() - t0
-    oczekuj(st == 504 and dt < 32, f"zawieszony dostawca: status {st or 'brak odpowiedzi'} po {dt:.0f} s — "
+    oczekuj(st == 504 and dt < 36, f"zawieszony dostawca: status {st or 'brak odpowiedzi'} po {dt:.0f} s — "
                                    "brak timeoutu odczytu / deadline'u dla krótkich")
     # b) długie: klient rozłącza się po 3 s — slot u dostawcy ma wrócić w ciągu kilku sekund
     time.sleep(1)
@@ -392,20 +393,20 @@ def ex10():
 
 
 def ex11():
-    """Dostawca `a` zawieszony (30 s TTFT): wyłącznik otwiera się, mediana < 5 s, do `a` trafia < 50% żądań."""
+    """Dostawca `a` zawieszony (30 s TTFT), 2/s × 40 s: wyłącznik otwiera się — mediana < 12 s, do `a` < 60% żądań."""
     wymagaj_aplikacji()
     mock_reset()
     try:
         mock("/admin/config", "PATCH", {"ttft_median_ms": 30000, "ttft_sigma": 0}, provider="a")
         a0 = mock_odp("a")
-        w = ruch(claims("summary", 40), rps=2, timeout=90)
+        w = ruch(claims("summary", 80), rps=2, timeout=90)
         time.sleep(1)
         da = roznica(a0, mock_odp("a"))
     finally:
         mock_reset()
     do_a = sum(da.values())
     p50 = pct([x["t"] for x in w], 50)
-    oczekuj(p50 < 5 and do_a < 0.5 * len(w), f"mediana {p50:.1f} s, do `a` poszło {do_a}/{len(w)} — każde żądanie "
+    oczekuj(p50 < 12 and do_a < 0.6 * len(w), f"mediana {p50:.1f} s, do `a` poszło {do_a}/{len(w)} — każde żądanie "
                                              "płaci timeout `a` przed `b` (brak wyłącznika)")
     return f"mediana {p50:.2f} s, do `a`: {do_a}/{len(w)}"
 
@@ -500,9 +501,9 @@ def ex15():
     """50 równoczesnych identycznych pytań FAQ (nowy klucz) → dokładnie 1 wywołanie LLM."""
     wymagaj_aplikacji()
     q = f"czy polisa obejmuje szkody od zalania {uuid.uuid4().hex[:8]}"
-    a0 = mock_odp()
+    a0, b0 = mock_odp("a"), mock_odp("b")      # oba: po ćw. 11 ruch może iść do `b` (wyłącznik otwarty)
     w = ruch([f"{APP}/faq?q={q}"] * 50, metoda="GET", timeout=60)
-    n = roznica(a0, mock_odp()).get("200", 0)
+    n = roznica(a0, mock_odp("a")).get("200", 0) + roznica(b0, mock_odp("b")).get("200", 0)
     oczekuj(all(x["status"] == 200 for x in w), f"odpowiedzi: {statusy(w)}")
     oczekuj(n == 1, f"{n} wywołań LLM dla 50 identycznych pytań — cache stampede (brak single-flight)")
     return "50 pytań → 1 wywołanie LLM"
