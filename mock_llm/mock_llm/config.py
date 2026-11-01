@@ -86,8 +86,8 @@ PROFILES: dict[str, dict] = {
     "domyslny": {},
     # limity jak na niskim progu konta: łatwo dobić 429 z jednej maszyny
     "limity": {"rpm": 120, "itpm": 60000, "otpm": 12000},
-    # dostawca z małą mocą: kolejka po stronie dostawcy, potem 529
-    "przeciazenie": {"capacity": 8, "overload_queue": 32},
+    # dostawca z małą mocą: 8 generacji naraz, kolejka 8, powyżej — 529 overloaded
+    "przeciazenie": {"capacity": 8, "overload_queue": 8},
     # co piąte wywołanie z bardzo wolnym pierwszym tokenem
     "wolny-start": {"slow_ttft_p": 0.2, "slow_ttft_ms": 3000},
     # niestabilny dostawca: losowe 529/500 i zerwane strumienie

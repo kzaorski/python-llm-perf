@@ -86,7 +86,10 @@ services:
       MOCK_URL: http://mock-llm:8061
     volumes:
       - ./k6:/scripts:ro
+      - ./solutions:/solutions:ro
       - ./data:/data:ro
+      # podsumowania testów (handleSummary → /wyniki/<nazwa>.json) — czyta je check.py i scripts/pomiar.py
+      - ./wyniki:/wyniki
     depends_on:
       lgtm: { condition: service_healthy }
 
