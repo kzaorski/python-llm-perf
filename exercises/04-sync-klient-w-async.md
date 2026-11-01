@@ -58,7 +58,10 @@ i z `/health`. Profil i lag pętli to tylko potwierdzenie. Naprawiasz klasyfikac
    ```
    powtórz krok 3 i w Grafanie: Explore → Pyroscope → `claims-assistant`, etykieta `tryb=wall`.
    Gorąca ścieżka wall prowadzi z `klasyfikuj` przez synchroniczny klient do oczekiwania na gnieździe.
-   ⟨E04-PROFIL⟩
+   U mnie: Pyroscope ma etykietę `tryb=wall` dla `claims-assistant`; w profilu wall są ramki `klasyfikuj` →
+   `Messages.create` (synchroniczny SDK) → `SyncStream.read` (odczyt z gniazda w wątku pętli). Przy tym
+   profilerze fala 20 równoległych klasyfikacji kończyła się po 0.3–0.6 s (pierwsza) … **10.4–11.5 s**
+   (ostatnia) — żądania obsługiwane jedno po drugim.
 6. Otwórz **`app/klasyfikacja.py`** (`TODO ćw. 04`). Zamień synchroniczne wywołanie na ścieżkę
    asynchroniczną aplikacji: `await obsluga.wykonaj(request, Zadanie(klasa="krotkie", ...))`. Dostajesz
    przy okazji wszystko, co ma ścieżka LLM: slot, pomiar czekania, telemetrię, wynik żądania.

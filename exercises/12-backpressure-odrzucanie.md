@@ -78,7 +78,9 @@ osobne pule per klasa, limit kolejki, budżet czekania (szybkie 503 z `Retry-Aft
    ```bash
    python scripts/pomiar.py ex12-podglad --dopływ-s 60 -- run -q /scripts/mieszany.js -e CZAS=60s -e DLUGIE_OD_S=20 -e DLUGIE_DO_S=60
    ```
-   ⟨E12-PODGLAD⟩
+   U mnie (stan po ćw. 12): ~2 min łącznie (60 s dopływu + 60.4 s opróżniania); krótkie 238 × 200, czekanie p99
+   0 ms, całość p99 1.71 s; długie (20–60 s) 24 × 200, czekanie p99 1.05 s; 3 × `status 0` (sieć Dockera,
+   patrz README). Podgląd potwierdza, że kod działa — o zachowaniu pod wielominutowym ogonem mówi tylko krok 7.
 9. `python check.py ex12` (30 długich po 15 s + 20 krótkich: krótkie czekają < 1 s, nadmiar długich
    dostaje szybkie 503; jeśli jest `wyniki/ex12-mieszany.json`, check dopisze czekanie krótkich z Twojego przebiegu).
 

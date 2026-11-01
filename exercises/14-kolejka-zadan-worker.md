@@ -43,10 +43,11 @@ najstarsze**, a współbieżność workera musi wynikać z mocy dostawcy, a nie 
    ID=$(curl -s -X POST 127.0.0.1:8060/claims/7/summary/async | python -c 'import json,sys; print(json.load(sys.stdin)["zadanie"])')
    curl -s 127.0.0.1:8060/jobs/$ID
    ```
-   W Prometheusie (po ~10 s; licznik workera liczy od jego startu, więc patrz na wartość, nie na `increase()` —
-   seria rodzi się od razu z pełną wartością i `increase` pokazuje 0):
+   W Prometheusie (po ~10 s; licznik workera liczy od startu procesu, więc patrz na wartość, nie na `increase()` —
+   seria rodzi się od razu z pełną wartością i `increase` pokazuje 0; `service_instance_id` rozdziela kolejne
+   uruchomienia workera — seria poprzedniego procesu jeszcze kilka minut jest widoczna):
    ```
-   sum by (wynik) (zadania_wykonane_total)
+   sum by (wynik, service_instance_id) (zadania_wykonane_total)
    kolejka_xlen
    ```
    U mnie: wszystkie 201 zadań rozstrzygnięte w ~2 s — **170 × `OverloadedError`** (529) i 31 × `ok`; ostatnie
@@ -71,7 +72,10 @@ najstarsze**, a współbieżność workera musi wynikać z mocy dostawcy, a nie 
    ```bash
    taskiq worker app.zadania:broker --workers 2 --max-async-tasks 4      # T2, 2 × 4 = 8
    ```
-8. Restart workera, `POST /admin/reset`, powtórka kroku 3 i zapytań z kroku 6. ⟨E14-PO⟩
+8. Restart workera, `POST /admin/reset`, powtórka kroku 3 i zapytań z kroku 6. U mnie (2 × 4): **201/201
+   gotowe**, atrapa 201 × 200 i **0 × 529**, ostatnie zadanie po 28 s; `kolejka_lag` max 176 → 0 (próbki co 2 s),
+   `kolejka_wiek_najstarszego_s` max 19.3 s, `pending` ≈ 8–9. Dla porównania przebieg z kroku 6 (2 × 100, nowy
+   eksporter): 171 × `OverloadedError` / 30 × `ok` w 2 s, atrapa 212 × 529, `kolejka_lag` max **0**, `pending` 26.
 
    U mnie: **200/200 zadań OK** w 28.7 s, 0 × 529, `kolejka_lag` max 190 → 0 (kolejka widoczna i opróżniana ~7/s).
 9. `python check.py ex14` (eksporter z `kolejka_lag` i `kolejka_wiek_najstarszego_s` na 8063; 60 zadań przy

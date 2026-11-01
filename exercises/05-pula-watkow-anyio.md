@@ -40,7 +40,9 @@ wolną moc. Naprawiasz handler tak, by nie zajmował wątku na czas czekania na 
    ```bash
    ps -o %cpu= -p $(lsof -tiTCP:8060 -sTCP:LISTEN)
    ```
-   ⟨E05-CPU⟩
+   U mnie: `%cpu` procesu **0.4** w trakcie czekania (16 w chwili, gdy fala wraca i 60 odpowiedzi jest
+   wysyłanych naraz); `/diag`: kolejka LLM pusta, `petla_lag_max_10s_ms` 2.6. Fale po rozgrzewce: 2.14–2.18 s
+   i ~4.3 s (pierwsza zaraz po starcie: 2.85 / 5.01 s).
 5. Otwórz **`app/szablony.py`** (`TODO ćw. 05`). Zamień handler na `async def` i wywołanie na
    asynchronicznego klienta aplikacji: `await klient.zapytaj(Zadanie(...))` z `app/llm/klient.py`.
    Renderowanie szablonu jest szybkie (mikrosekundy CPU) — może zostać w pętli.
