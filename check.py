@@ -328,7 +328,8 @@ def ex08():
         mock_reset()
     n429, n200 = d.get("429", 0), d.get("200", 0)
     oczekuj(w_toku_max[0] >= 16, f"sonda nie wysłała ruchu ponad limit dostawcy (max {w_toku_max[0]} wywołań naraz) — "
-                                 "za mało slotów (ćw. 06)? Limiter tempa sprawdzamy dopiero przy pełnej puli")
+                                 "za mało slotów (ćw. 06)? Limiter tempa sprawdzamy dopiero przy pełnej puli. Jeśli przed chwilą był "
+                                 "poprzedni przebieg, limiter aplikacji pamięta wyczerpany limit (120/min) — odczekaj minutę")
     ok = sum(1 for x in w if x["status"] == 200)
     # po ćw. 12 część fali 90 żądań dostaje NASZE 503 (kolejka pełna / budżet czekania) — to backpressure,
     # nie skutek limitów dostawcy; zależy od wyścigu przy starcie fali (smoke: 0–26 z 90)
