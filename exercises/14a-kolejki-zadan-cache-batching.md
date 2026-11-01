@@ -196,7 +196,11 @@ wywołaniem, endpoint `POST /claims/{n}/priority`). Dwa parametry:
 
 Wsad wysyła się, gdy minie okno **albo** wsad się zapełni. Średni rozmiar
 wsadu ≈ **min(λ × okno, max)**; dodatkowa latencja pojedynczej prośby ≤ okno.
-Aplikacja raportuje rozmiar w `app_batch_size_bucket`.
+Aplikacja raportuje rozmiar w histogramie `app_batch_size` (kubełki domyślne
+OTel: 0, 5, 10, 25, 50, …). Patrz na średnią `sum(app_batch_size_sum) /
+sum(app_batch_size_count)` — `histogram_quantile` przy kilku rzadkich wsadach
+interpoluje wewnątrz szerokiego kubełka i zmyśla rozmiar (wsady 1 i 30 dają
+„p99” ≈ 49.5).
 
 **Intuicja.** Bus wahadłowy na lotnisku: odjeżdża co 10 minut albo gdy się
 zapełni. Przy małym ruchu jedziesz sam, ale po 10 minutach czekania; przy
