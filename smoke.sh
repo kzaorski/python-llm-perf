@@ -15,10 +15,24 @@ TRYB=${1:-pelny}
 mkdir -p .run/logs wyniki
 PIDS=()
 
+potomkowie() {  # pid → pid i wszyscy jego potomkowie (najpierw dzieci)
+  local d
+  for d in $(pgrep -P "$1" 2>/dev/null); do potomkowie "$d"; done
+  echo "$1"
+}
+
 sprzatnij() {
-  for p in "${PIDS[@]:-}"; do [ -n "$p" ] && kill "$p" 2>/dev/null || true; done
-  sleep 1
-  for p in "${PIDS[@]:-}"; do [ -n "$p" ] && kill -9 "$p" 2>/dev/null || true; done
+  # taskiq worker (multiprocessing spawn) i gunicorn mają procesy potomne: zabicie samego mastera zostawia
+  # sieroty, które dalej konsumują kolejkę ze starą konfiguracją — dlatego zbieramy całe drzewo procesów.
+  local wszystkie=() p
+  for p in "${PIDS[@]:-}"; do [ -n "$p" ] && wszystkie+=($(potomkowie "$p")); done
+  for p in "${wszystkie[@]:-}"; do [ -n "$p" ] && kill "$p" 2>/dev/null || true; done
+  for _ in $(seq 1 25); do
+    local zyje=0
+    for p in "${wszystkie[@]:-}"; do [ -n "$p" ] && kill -0 "$p" 2>/dev/null && zyje=1; done
+    [ "$zyje" = 0 ] && break; sleep 0.2
+  done
+  for p in "${wszystkie[@]:-}"; do [ -n "$p" ] && kill -9 "$p" 2>/dev/null || true; done
   curl -s -X POST 127.0.0.1:8061/admin/reset >/dev/null || true
 }
 trap sprzatnij EXIT
