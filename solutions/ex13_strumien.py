@@ -26,6 +26,12 @@ def sse(event: str, data: dict) -> bytes:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n".encode()
 
 
+def pierwszy_fragment(czasy: dict, t0: float) -> None:
+    """Infrastruktura pomiaru: chwila wysłania klientowi pierwszego fragmentu (TTFT od strony klienta)."""
+    czasy["pierwszy"] = time.perf_counter() - t0
+    telemetry.zapisz(telemetry.H_PIERWSZY, czasy["pierwszy"])
+
+
 def zadanie(n: int, request: Request) -> Zadanie:
     z = dane.zgloszenie(n)
     return Zadanie(klasa="krotkie", endpoint="reply-stream", max_tokens=700,
@@ -53,6 +59,8 @@ async def odpowiedz_strumieniem(n: int, request: Request):
                         czasy["ttft"] = time.perf_counter() - t1
                         telemetry.zapisz(telemetry.H_TTFT, czasy["ttft"], klasa=z.klasa)
                     n_fragm += 1
+                    if n_fragm == 1:
+                        pierwszy_fragment(czasy, t0)
                     yield sse("delta", {"tekst": tekst})
                     # Starlette (ASGI ≥ 2.4) nie przerwie generatora po rozłączeniu sama — sprawdzamy
                     if n_fragm % 20 == 0 and await request.is_disconnected():

@@ -493,7 +493,7 @@ def ex17():
 
 
 # Finał: incydent przywraca te wady; „done" = wszystkie usunięte (te same sondy co w ćwiczeniach).
-FINAL = {"W3": ex06, "W9": ex13, "W10": ex15, "W16": ex10}
+FINAL = {"W3": ex06, "W9": ex13, "W10": ex15, "W16": ex10}   # = incydent.sh final (W3 jako LLM_SLOTY=4)
 
 
 def ex18():

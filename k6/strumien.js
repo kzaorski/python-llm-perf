@@ -1,6 +1,7 @@
 // Ćw. 13 — TTFT widziany przez KLIENTA strumienia (POST /claims/{n}/reply/stream, SSE).
-// http_req_waiting = czas do pierwszego bajtu odpowiedzi (TTFB) ≈ TTFT klienta; http_req_duration = całość.
-// Porównaj z app_ttft_krotkie (TTFT od strony dostawcy, metryka llm.ttft) — buforowanie = rozjazd.
+// UWAGA (zmierzone): http_req_waiting to czas do NAGŁÓWKÓW odpowiedzi, a StreamingResponse wysyła je od razu —
+// k6 nie widzi, kiedy przyszło pierwsze zdarzenie SSE. Ten scenariusz daje ruch i czas całkowity; TTFT klienta
+// mierz metryką aplikacji app_stream_first_chunk_seconds (vs llm_ttft_seconds) albo scripts/strumien_ttft.py.
 //
 //   docker compose run --rm k6 run -o experimental-prometheus-rw /scripts/strumien.js   (-e RATE=2 -e CZAS=30s)
 import http from 'k6/http';

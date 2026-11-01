@@ -13,6 +13,8 @@ z których korzystają pozostałe moduły (nazwy w Prometheusie po konwersji OTL
 - `llm.http.responses`       odpowiedzi dostawcy wg statusu                   (`llm_http_responses_total`)
 - `llm.waiting` / `llm.inflight` / `llm.oldest_waiting_age` — stan kolejki do LLM per klasa (gauge)
 - `app.event_loop.lag`  [s]  opóźnienie pętli zdarzeń (próbkowane co 100 ms)  (`app_event_loop_lag_seconds_*`)
+- `app.stream.first_chunk` [s] od wejścia żądania do wysłania klientowi PIERWSZEGO fragmentu strumienia
+                             (`app_stream_first_chunk_seconds_*`) — porównaj z `llm.ttft` (ćw. 13)
 
 Zmienne: OTEL_SERVICE_NAME (domyślnie claims-assistant), OTEL_EXPORTER_OTLP_ENDPOINT,
 APP_WARIANT (etykieta wariantu uruchomienia, np. uvicorn / gunicorn-uvicorn), PYROSCOPE=1 (profilowanie),
@@ -68,7 +70,7 @@ def konfiguruj(service: str | None = None) -> None:
     trace.set_tracer_provider(tp)
     views = [View(instrument_type=None, instrument_name=n, aggregation=ExplicitBucketHistogramAggregation(KUBELKI_S))
              for n in ("llm.queue.wait", "llm.call.duration", "llm.ttft", "app.request.duration",
-                       "app.event_loop.lag", "zadania.czas", "zadania.czekanie")]
+                       "app.event_loop.lag", "app.stream.first_chunk", "zadania.czas", "zadania.czekanie")]
     mp = MeterProvider(resource=res, views=views,
                        metric_readers=[PeriodicExportingMetricReader(OTLPMetricExporter(), export_interval_millis=5000)])
     metrics.set_meter_provider(mp)
@@ -92,18 +94,20 @@ def _pyroscope(tp: TracerProvider) -> None:
 
 
 # Instrumenty — tworzone w konfiguruj(); do tego czasu atrapy no-op (import bez skutków ubocznych).
-H_CZEKANIE = H_WYWOLANIE = H_TTFT = H_ZADANIE = H_LAG = None
+H_CZEKANIE = H_WYWOLANIE = H_TTFT = H_ZADANIE = H_LAG = H_PIERWSZY = None
 C_ZADANIA = C_PROBY = C_ODPOWIEDZI = C_CACHE = None
 H_WSAD = None
 
 
 def _instrumenty() -> None:
-    global H_CZEKANIE, H_WYWOLANIE, H_TTFT, H_ZADANIE, H_LAG, C_ZADANIA, C_PROBY, C_ODPOWIEDZI, C_CACHE, H_WSAD
+    global H_CZEKANIE, H_WYWOLANIE, H_TTFT, H_ZADANIE, H_LAG, H_PIERWSZY, C_ZADANIA, C_PROBY, C_ODPOWIEDZI, C_CACHE, H_WSAD
     H_CZEKANIE = meter.create_histogram("llm.queue.wait", unit="s", description="Czas czekania na slot LLM")
     H_WYWOLANIE = meter.create_histogram("llm.call.duration", unit="s", description="Czas wywołania LLM (obsługa)")
     H_TTFT = meter.create_histogram("llm.ttft", unit="s", description="Czas do pierwszego tokenu")
     H_ZADANIE = meter.create_histogram("app.request.duration", unit="s", description="Czas end-to-end żądania")
     H_LAG = meter.create_histogram("app.event_loop.lag", unit="s", description="Opóźnienie pętli zdarzeń")
+    H_PIERWSZY = meter.create_histogram("app.stream.first_chunk", unit="s",
+                                        description="Od wejścia żądania do wysłania pierwszego fragmentu strumienia")
     H_WSAD = meter.create_histogram("app.batch.size", unit="1", description="Rozmiar wsadu wysłanego do LLM")
     C_ZADANIA = meter.create_counter("app.requests", description="Żądania wg wyniku")
     C_PROBY = meter.create_counter("llm.http.attempts", description="Próby HTTP do dostawcy (z ponowieniami SDK)")

@@ -3,9 +3,11 @@
 //   (klient analiz rezygnuje po 30 s — jak przeglądarka/proxy z krótkim limitem).
 import http from 'k6/http';
 import exec from 'k6/execution';
+import { Trend } from 'k6/metrics';
 import { APP, zapisz, podsumowanie } from './lib.js';
 
 const CZAS = __ENV.CZAS || '240s';
+const caloscStrumienia = new Trend('klient_calosc_strumien', true);
 const PYTANIA = ['jak zgłosić szkodę z OC sprawcy', 'ile trwa likwidacja szkody', 'czy należy mi się auto zastępcze',
                  'jak odwołać się od decyzji', 'jakie dokumenty do szkody mieszkaniowej'];
 
@@ -32,7 +34,8 @@ export function streszczenie() {
 
 export function strumien() {
   const i = exec.scenario.iterationInTest;
-  http.post(`${APP}/claims/${1 + (i % 20000)}/reply/stream`, null, { timeout: '120s', tags: { endpoint: 'reply-stream' } });
+  const r = http.post(`${APP}/claims/${1 + (i % 20000)}/reply/stream`, null, { timeout: '120s', tags: { endpoint: 'reply-stream' } });
+  caloscStrumienia.add(r.timings.duration);
 }
 
 export function faq() {

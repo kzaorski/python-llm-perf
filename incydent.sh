@@ -15,14 +15,15 @@ PY=.venv/bin/python
 PIDF=.run/incydent.pid
 mkdir -p .run/logs
 
-# scenariusze: stan (--do), wady, profil atrapy
+# scenariusze: stan (--do), wady (moduły cofnięte do wersji sprzed naprawy; "-" = brak), profil atrapy, env
+# (część wad to konfiguracja, nie kod — np. za mała pula: LLM_SLOTY=4 na stanie końcowym)
 scenariusz() {
   case "$1" in
-    final)   echo "17 W3,W9,W10,W16 domyslny" ;;
-    mini-I)  echo "3 W3 domyslny" ;;
-    mini-II) echo "7 W2 domyslny" ;;
+    final)    echo "17 W9,W10,W16 domyslny LLM_SLOTY=4 FAQ_TTL_S=30" ;;
+    mini-I)   echo "3 - domyslny LLM_SLOTY=4" ;;
+    mini-II)  echo "7 W2 domyslny" ;;
     mini-III) echo "11 W5 przeciazenie" ;;
-    mini-IV) echo "13 W18 domyslny" ;;
+    mini-IV)  echo "13 W18 domyslny" ;;
     *) echo "" ;;
   esac
 }
@@ -35,7 +36,8 @@ case "${1:-}" in
     if [ "${2:-}" = "własny" ] || [ "${2:-}" = "wlasny" ]; then
       DO=$3; WADY=${4:-}; PROFIL=${5:-domyslny}; NAZWA=wlasny
     else
-      read -r DO WADY PROFIL <<<"$(scenariusz "${2:-final}")"
+      read -r DO WADY PROFIL ENVS <<<"$(scenariusz "${2:-final}")"
+      [ "$WADY" = "-" ] && WADY=""
       NAZWA=${2:-final}
       [ -n "$DO" ] || { echo "nieznany scenariusz: ${2:-}"; exit 2; }
     fi
@@ -43,7 +45,7 @@ case "${1:-}" in
     $PY scripts/nakladka.py --do "$DO" ${WADY:+--wady "$WADY"} --cel "$CEL" >/dev/null
     curl -s -X POST 127.0.0.1:8061/admin/reset >/dev/null
     curl -s -X POST "127.0.0.1:8061/admin/profile/$PROFIL" >/dev/null
-    (cd "$CEL" && APP_WARIANT="incydent-$NAZWA" nohup ../../.venv/bin/uvicorn app.main:app --port 8060 --no-access-log \
+    (cd "$CEL" && env ${ENVS:-} APP_WARIANT="incydent-$NAZWA" nohup ../../.venv/bin/uvicorn app.main:app --port 8060 --no-access-log \
       > ../logs/incydent.log 2>&1 & echo $! > ../incydent.pid)
     for _ in $(seq 1 100); do curl -fsS 127.0.0.1:8060/diag/ping >/dev/null 2>&1 && break; sleep 0.2; done
     echo "incydent '$NAZWA' działa na :8060 (pid $(cat $PIDF)). Teraz: ./incydent.sh ruch — i do Grafany: http://127.0.0.1:3060"
