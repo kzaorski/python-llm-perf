@@ -505,8 +505,11 @@ def ex15():
     a0, b0 = mock_odp("a"), mock_odp("b")      # oba: po ćw. 11 ruch może iść do `b` (wyłącznik otwarty)
     w = ruch([f"{APP}/faq?q={q}"] * 50, metoda="GET", timeout=60)
     n = roznica(a0, mock_odp("a")).get("200", 0) + roznica(b0, mock_odp("b")).get("200", 0)
-    oczekuj(all(x["status"] == 200 for x in w), f"odpowiedzi: {statusy(w)}")
-    oczekuj(n == 1, f"{n} wywołań LLM dla 50 identycznych pytań — cache stampede (brak single-flight)")
+    # najpierw liczba wywołań LLM (objaw W10), statusy obok — przy innych wadach (np. mało slotów → 503)
+    # sam rozkład statusów wskazywałby na nie, a nie na stampede
+    oczekuj(n == 1, f"{n} wywołań LLM dla 50 identycznych pytań — cache stampede (brak single-flight); "
+                    f"odpowiedzi: {statusy(w)}")
+    oczekuj(all(x["status"] == 200 for x in w), f"1 wywołanie LLM, ale nie wszyscy dostali odpowiedź: {statusy(w)}")
     return "50 pytań → 1 wywołanie LLM"
 
 
