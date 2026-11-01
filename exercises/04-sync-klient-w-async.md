@@ -40,7 +40,9 @@ i z `/health`. Profil i lag pętli to tylko potwierdzenie. Naprawiasz klasyfikac
    docker compose run --rm -e WYNIK=ex04-przed k6 run -o experimental-prometheus-rw /scripts/gunicorn.js \
      -e GUNICORN_URL=http://host.docker.internal:8060 -e SCIEZKA=classify -e RATE=6 -e CZAS=30s
    ```
-   ⟨E04-PRZED⟩
+   U mnie (dokładnie te polecenia): k6 181 żądań, 179 × 200 + 2 × `status 0`, p50 **33.8 s**, p99 **69.0 s**,
+   test trwał 99.8 s przy 30 s dopływu; najwolniejszy `/diag/ping` **54.5 s**; `/diag` → kolejka LLM pusta
+   (`czekajace` 0) — czekanie nie jest na semaforze.
 4. Grafana → Prometheus:
    ```
    sum by (endpoint) (rate(app_requests_total[1m]))
@@ -60,7 +62,8 @@ i z `/health`. Profil i lag pętli to tylko potwierdzenie. Naprawiasz klasyfikac
 6. Otwórz **`app/klasyfikacja.py`** (`TODO ćw. 04`). Zamień synchroniczne wywołanie na ścieżkę
    asynchroniczną aplikacji: `await obsluga.wykonaj(request, Zadanie(klasa="krotkie", ...))`. Dostajesz
    przy okazji wszystko, co ma ścieżka LLM: slot, pomiar czekania, telemetrię, wynik żądania.
-7. Restart (bez profilera) i powtórka kroku 3 z `-e WYNIK=ex04-po`. ⟨E04-PO⟩
+7. Restart (bez profilera) i powtórka kroku 3 z `-e WYNIK=ex04-po`. U mnie: 181 × 200, 5.93/s, p50 0.53 s,
+   p99 1.01 s, test 30.5 s; najwolniejszy `/diag/ping` 4.8 ms.
 8. `python check.py ex04` (ruch otwarty 6/s na `/classify` + pomiar `/diag/ping` w tle).
 
 U mnie (pomiar harnessem: 6/s klasyfikacji + 2/s streszczeń w tle, 30 s):

@@ -42,19 +42,23 @@ Przestawiasz gunicorna na `UvicornWorker` z liczbą procesów dobraną do zadani
    ```bash
    docker compose run --rm k6 run -o experimental-prometheus-rw /scripts/gunicorn.js -e RATE=15 -e CZAS=30s -e TOTAL_S=3 -e WARIANT=sync
    ```
-   ⟨E07-SYNC⟩
+   U mnie (26 procesów, 1658 MB RSS): 384 × 200 i **67 × `status 0`** (połączenie zerwane — backlog
+   gniazda pełny), p50 11.4 / p99 19.6 s, test 49.6 s przy 30 s dopływu.
 4. **Wywołanie dłuższe niż 30 s** (atrapa milczy 90 s przed pierwszym tokenem):
    ```bash
    curl -s -o /dev/null -w '%{http_code} po %{time_total} s\n' -X POST -H 'x-mock-ttft-ms: 90000' 127.0.0.1:8062/claims/1/summary
    ```
-   W logu gunicorna (T3) szukaj `WORKER TIMEOUT`. ⟨E07-SYNC-90⟩
+   W logu gunicorna (T3) szukaj `WORKER TIMEOUT`. U mnie: `500 po 30.9 s`, w logu 1 × `WORKER TIMEOUT`.
 5. Zatrzymaj gunicorna (Ctrl+C w T3). Otwórz **`gunicorn.conf.py`** i przestaw go na:
    `worker_class = "uvicorn_worker.UvicornWorker"`, `wsgi_app = "app.main:app"` (ta sama aplikacja co
    na 8060), 2 procesy, `LLM_SLOTY` per proces w `raw_env` tak, by suma ≤ moc atrapy (64), oraz
    `APP_WARIANT=gunicorn-uvicorn` w `raw_env` (po tym check rozpozna wariant). Zostaw komentarz,
    dlaczego tyle procesów.
 6. Uruchom ponownie, sprawdź `/health` (`"serwer": "gunicorn-uvicorn"`) i pamięć (krok 2), powtórz
-   kroki 3–4 z `-e WARIANT=uvicorn`. ⟨E07-UVICORN⟩
+   kroki 3–4 z `-e WARIANT=uvicorn`. U mnie (3 procesy z masterem, 361 MB RSS): **451 × 200**, 0 zerwanych,
+   p50 5.6 / p99 11.6 s, czekanie na slot p50 2.2 / p99 8.0 s; wywołanie 90 s → **200 po 90.9 s**. Czekanie
+   na slot mimo 2 × 32 ≥ L ≈ 15 × 3.5 = 52 to nierówny podział połączeń między procesy (pytanie 3) — w innym
+   przebiegu (tabela niżej) wyszło p50 3.9 s; licz z zapasem.
 
    U mnie (harness, ten sam ruch):
 

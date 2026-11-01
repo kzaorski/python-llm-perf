@@ -40,7 +40,16 @@ rośnie szybciej niż przepustowość. Kodu nie zmieniasz; zmieniasz tylko liczb
    max(llm_inflight{klasa="krotkie"})
    histogram_quantile(0.9, sum by (le) (rate(llm_queue_wait_seconds_bucket{klasa="krotkie"}[20s])))
    ```
-   ⟨WYNIK-RAMPA4⟩
+   U mnie (456 żądań; wartości co 20 s z Prometheusa, `query_range`):
+
+   | t [s] | 20 | 40 | 60 | 80 | 100 | 120 | 140 | 160 |
+   |---|---|---|---|---|---|---|---|---|
+   | osiągnięte tempo [/s] | 0.9 | 1.9 | 2.2 | 3.4 | 3.6 | 3.6 | 4.0 | 2.9* |
+   | `llm_inflight` max | 2 | 3 | **4** | 4 | 4 | 4 | 4 | 4 |
+   | czekanie p90 [s] | 0 | 0 | 0 | 0.85 | 2.7 | 7.3 | 14.4 | 19.7 |
+
+   \* po końcu dopływu (opróżnianie). Tempo zatrzymuje się na ~3.6–4/s, sloty przyklejone do 4, a czekanie
+   rośnie z każdym schodkiem — k6 na koniec: czekanie p99 19.6 s przy obsłudze LLM ~1 s.
 4. **Zmiana pojemności bez zmiany kodu.** Zatrzymaj aplikację i uruchom ją z liczbą slotów, którą
    policzyłeś dla ~30/s (ja wziąłem 32):
    ```bash

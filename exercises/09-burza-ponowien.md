@@ -46,7 +46,9 @@ ratują. Zostawiasz jedną warstwę ponowień z backoffem, jitterem i budżetem.
    sum(increase(llm_http_attempts_total[2m])) / sum(increase(app_requests_total{endpoint="summary"}[2m]))
    sum by (status) (increase(llm_http_responses_total[2m]))
    ```
-   ⟨E09-PRZED⟩ (licznik `/diag` jest od startu procesu — mierz na świeżo uruchomionej aplikacji).
+   U mnie (dokładnie te polecenia): 172 × 200 + 29 × 502, p99 6.4 s; `/diag`: **622 próby HTTP na 201 żądań
+   = 3.09**; atrapa: 172 × 200 i 450 × 529. (Licznik `/diag` jest od startu procesu — mierz na świeżo
+   uruchomionej aplikacji.)
 5. Napraw dwie rzeczy:
    - **`app/llm/klient.py`**: klient krótkich bez ponowień SDK (`max_retries=0`) — jedna warstwa ponowień;
    - **`app/llm/ponowienia.py`**: backoff wykładniczy z pełnym jitterem (baza 0.5 s, limit 8 s),
@@ -54,7 +56,9 @@ ratują. Zostawiasz jedną warstwę ponowień z backoffem, jitterem i budżetem.
      (`anthropic.APITimeoutError`, `httpx2.TimeoutException`). Pamiętaj: 529 to `anthropic.OverloadedError`
      — nie jest podklasą `InternalServerError`.
 6. Restart aplikacji, `curl -s -X POST 127.0.0.1:8061/admin/profile/przeciazenie`, powtórka kroków 3–4
-   z `-e WYNIK=ex09-po`. ⟨E09-PO⟩
+   z `-e WYNIK=ex09-po`. U mnie: 162 × 200 + 39 × 502, p99 3.6 s; `/diag`: **242 próby na 201 żądań = 1.20**;
+   atrapa 162 × 200 i 80 × 529. Uwaga: zapytanie Prometheusa z oknem `[2m]` tuż po poprzednim przebiegu
+   miesza oba (u mnie pokazało 2.21) — odczekaj 2 min albo zawęź okno do czasu testu (`[30s]`).
 
    U mnie (harness, 10/s × 20 s): **3.65 próby HTTP / żądanie** (730 prób, 567 × 529), 163 OK, p99 6.4 s →
    **1.20** (240 prób, 88 × 529), 152 OK, p99 3.6 s. Sukcesów prawie tyle samo — ponowienia bez backoffu

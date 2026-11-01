@@ -34,7 +34,8 @@ naszej stronie. Zobaczysz też, czego limiter NIE naprawi: przepustowości.
      -d '{"model":"claude-haiku-5-5","max_tokens":200,"messages":[{"role":"user","content":"test"}]}' \
      127.0.0.1:8061/v1/messages | grep -i ratelimit
    ```
-   ⟨E08-NAGLOWKI⟩
+   U mnie: `requests-limit: 120`, `input-tokens-limit: 60000`, `output-tokens-limit: 12000`, po jednym
+   wywołaniu `output-tokens-remaining: 11800` (zarezerwowane `max_tokens` = 200), plus `*-reset`.
 2. **Rachunek i hipoteza.** Streszczenie ma `max_tokens=200`. Ile streszczeń/min przepuści limit tokenów
    wyjścia? A RPM? Co się stanie przy ruchu 3/s przez 60 s (180 żądań)? Ile 429 zobaczy atrapa, ile błędów klient?
 3. Ruch:
@@ -42,7 +43,7 @@ naszej stronie. Zobaczysz też, czego limiter NIE naprawi: przepustowości.
    docker compose run --rm -e WYNIK=ex08-przed k6 run -o experimental-prometheus-rw /scripts/otwarty.js -e RATE=3 -e CZAS=60s
    curl -s 127.0.0.1:8061/admin/stats | python -m json.tool | head -20
    ```
-   ⟨E08-PRZED⟩
+   U mnie: k6 172 × 200 + **9 × 503**, p99 6.3 s; atrapa: 174 × 200 i **129 × 429**.
 4. Prometheus — co widzi dostawca, a co aplikacja:
    ```
    sum by (status) (increase(mock_llm_requests_total{provider="a"}[3m]))
@@ -56,7 +57,9 @@ naszej stronie. Zobaczysz też, czego limiter NIE naprawi: przepustowości.
    - `tempo()`: czekasz (FIFO, `asyncio.Lock`), aż oba kubełki mają żetony i minęła pauza; dopóki nie
      znasz limitów (pierwsze odpowiedzi) — nie ograniczasz (pierwszą falę trzyma pula slotów).
 6. Restart aplikacji, ponownie `curl -s -X POST 127.0.0.1:8061/admin/profile/limity` (profil ustawia też
-   pełne kubełki limitów), powtórka kroku 3 z `-e WYNIK=ex08-po`. ⟨E08-PO⟩
+   pełne kubełki limitów), powtórka kroku 3 z `-e WYNIK=ex08-po`. U mnie: atrapa **0 × 429** (167 × 200),
+   k6 165 × 200 bez błędów, ale czekanie na slot p90 36.5 / p99 **44.1 s** i test 106 s przy 60 s dopływu;
+   k6 pominął 16 iteracji (`dropped_iterations` — VU czekały w kolejce limitera; licz je jako nadmiar).
 
    U mnie (harness, 3/s × 60 s): **133 × 429** u atrapy i 7 żądań zakończonych `503 limit_dostawcy`,
    p99 6.7 s → **0 × 429**, 180/180 OK, ale czekanie na slot p99 **58.2 s** — nadmiar czeka u nas.

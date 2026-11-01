@@ -35,7 +35,10 @@ klienta mniejsza — czekanie przenosi się tam, gdzie Twój pomiar go nie widzi
    docker compose run --rm -e WYNIK=ex06-przed k6 run -o experimental-prometheus-rw /scripts/otwarty.js -e RATE=20 -e CZAS=15s
    ```
    W trakcie: `curl -s 127.0.0.1:8060/diag | python -m json.tool` — `kolejka.krotkie.czekajace` i
-   `wiek_najstarszego_s` rosną, `w_toku` = 4. ⟨E06-PRZED⟩
+   `wiek_najstarszego_s` rosną, `w_toku` = 4. U mnie: 277 × 200, test 74.3 s przy 15 s dopływu, k6 pominął
+   24 iteracje (`dropped_iterations` — wszystkie 200 wstępnie przydzielonych VU czekały, a dokładanie nowych nie
+   nadążyło; przy tak zatkanym systemie to i tak niedoszacowanie kolejki); czekanie p50 30.0 / p99 **57.4 s**
+   przy LLM p50 1.04 s; `llm_waiting` max 213, `mock_llm_generating` max **4**.
 4. Grafana → Prometheus (USE dla slotów i dla dostawcy):
    ```
    max_over_time(llm_inflight{klasa="krotkie"}[2m])
@@ -46,7 +49,8 @@ klienta mniejsza — czekanie przenosi się tam, gdzie Twój pomiar go nie widzi
    Sloty nasycone (4), kolejka setek żądań, a dostawca o mocy 64 generuje 4 naraz.
 5. Otwórz **`app/llm/limiter.py`**: `SLOTY = int(os.environ.get("LLM_SLOTY", "4"))`. Ustaw domyślną
    wartość z rachunku (L = λ·W + zapas na ogon; ja wziąłem 32) i zapisz w komentarzu, skąd się wzięła.
-6. Restart, powtórka kroku 3 z `-e WYNIK=ex06-po`. ⟨E06-PO⟩
+6. Restart, powtórka kroku 3 z `-e WYNIK=ex06-po`. U mnie: 301 × 200 w 16.2 s (18.6/s), czekanie p99 **0 ms**,
+   LLM p50 1.03 / p99 1.74 s.
 
    U mnie (harness, ten sam ruch 20/s × 15 s): czekanie p50 32.3 / p99 **63.1 s** przy obsłudze LLM
    p50 1.06 s → po zmianie czekanie p99 **0.0 s**, całość p99 1.70 s.
@@ -57,8 +61,11 @@ klienta mniejsza — czekanie przenosi się tam, gdzie Twój pomiar go nie widzi
    LLM_SLOTY=64 LLM_POLACZENIA=8 uvicorn app.main:app --port 8060
    docker compose run --rm -e WYNIK=ex06-pula8 k6 run -o experimental-prometheus-rw /scripts/otwarty.js -e RATE=20 -e CZAS=15s
    ```
-   ⟨E06-PULA8⟩ Dowód z drugiej strony: `max_over_time(mock_llm_generating{provider="a"}[2m])` = 8 —
-   dostawca nigdy nie dostał więcej niż 8 wywołań, choć semafor wpuścił 64. Czasu czekania w puli NIE
+   U mnie: 294 × 200 + 6 × `status 0`, całość p50 13.1 / p99 25.4 s; „LLM” (wywołanie razem z czekaniem
+   w puli) p50 **8.5 s** zamiast ~1 s; `llm_inflight` 64, `llm_waiting` max 116. Dowód z drugiej strony: `max_over_time(mock_llm_generating{provider="a"}[2m])` = 8 —
+   dostawca nigdy nie dostał więcej niż 8 wywołań, choć semafor wpuścił 64 (jeśli poprzedni przebieg skończył
+   się < 2 min temu, zawęź okno do czasu testu, np. `[40s]` — u mnie `[2m]` złapało jeszcze 21 z kroku 6).
+   Czasu czekania w puli NIE
    wyprowadzaj z różnicy spanów — po prostu go nie mierzysz.
 8. Ten sam wariant z krótkim `pool timeout` zobaczysz w praktyce po ćw. 10 (klient ma tam `pool=5 s`).
    Zmierzyłem go z wyprzedzeniem: przy `LLM_FALLBACK=0` **86/300** żądań kończy się `504`
