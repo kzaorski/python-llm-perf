@@ -70,7 +70,8 @@ Przestawiasz gunicorna na `UvicornWorker` z liczbą procesów dobraną do zadani
 7. `python check.py ex07` (gunicorn musi działać na 8062).
 
 ## Kryteria „done”
-- [ ] `/health` na 8062 zgłasza `gunicorn-uvicorn`; 40 równoległych żądań po ~2.1 s kończy się jedną falą.
+- [ ] `/health` na 8062 zgłasza `gunicorn-uvicorn`; 32 równoległe żądania po ~2.1 s kończą się jedną falą
+      (check celowo nie wysyła więcej niż sloty jednego procesu — patrz pytanie 3).
 - [ ] Wywołanie 90 s przez gunicorna kończy się 200, nie 500.
 - [ ] Liczbę procesów i slotów na proces umiesz uzasadnić (CPU vs współbieżność vs moc dostawcy).
 - [ ] `python check.py ex07` przechodzi.

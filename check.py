@@ -280,7 +280,7 @@ def ex06():
 
 
 def ex07():
-    """Na :8062 działa gunicorn z UvicornWorker (aplikacja ASGI), 40 równoległych żądań w jednej fali."""
+    """Na :8062 działa gunicorn z UvicornWorker (aplikacja ASGI), 32 równoległe żądania w jednej fali."""
     try:
         h = httpx2.get(GUNICORN + "/health", timeout=5).json()
     except Exception as e:  # noqa: BLE001
@@ -289,11 +289,14 @@ def ex07():
                                                    "(oczekiwany gunicorn-uvicorn: UvicornWorker + app.main)")
     hdr = {"x-mock-ttft-ms": "2000", "x-mock-total-s": "0.1"}
     s = random.randint(1, 15000)
-    w = ruch([f"{GUNICORN}/claims/{s + i}/summary" for i in range(40)], headers=hdr, timeout=60)
+    # 32 = sloty JEDNEGO procesu: gniazdo nie dzieli połączeń po równo (pytanie 3), więc przy 40 żądaniach
+    # jeden proces dostawał czasem > 32 i część czekała na slot (smoke: 3 z 7 przebiegów) — sonda ma badać
+    # model procesów, nie szczęście w podziale połączeń
+    w = ruch([f"{GUNICORN}/claims/{s + i}/summary" for i in range(32)], headers=hdr, timeout=60)
     ts = [x["t"] for x in w if x["status"] == 200]
-    oczekuj(len(ts) == 40, f"{len(ts)}/40 odpowiedzi 200: {statusy(w)}")
-    oczekuj(max(ts) < 3.5, f"40 żądań po ~2.1 s: max {max(ts):.1f} s — żądania czekają na wolny worker")
-    return f"gunicorn-uvicorn: 40× max {max(ts):.2f} s"
+    oczekuj(len(ts) == 32, f"{len(ts)}/32 odpowiedzi 200: {statusy(w)}")
+    oczekuj(max(ts) < 3.5, f"32 żądania po ~2.1 s: max {max(ts):.1f} s — żądania czekają na wolny worker")
+    return f"gunicorn-uvicorn: 32× max {max(ts):.2f} s"
 
 
 def ex08():
@@ -327,10 +330,14 @@ def ex08():
     oczekuj(w_toku_max[0] >= 16, f"sonda nie wysłała ruchu ponad limit dostawcy (max {w_toku_max[0]} wywołań naraz) — "
                                  "za mało slotów (ćw. 06)? Limiter tempa sprawdzamy dopiero przy pełnej puli")
     ok = sum(1 for x in w if x["status"] == 200)
+    # po ćw. 12 część fali 90 żądań dostaje NASZE 503 (kolejka pełna / budżet czekania) — to backpressure,
+    # nie skutek limitów dostawcy; zależy od wyścigu przy starcie fali (smoke: 0–26 z 90)
+    bp = sum(1 for x in w if x["status"] == 503 and (x["json"] or {}).get("blad") in ("kolejka_pelna", "czekanie_na_slot"))
     oczekuj(n429 <= max(1, 0.01 * n200), f"atrapa zwróciła {n429}× 429 przy {n200}× 200 — brak limitera tempa; "
                                          f"aplikacja: {statusy(w)}")
-    oczekuj(ok == 90, f"aplikacja: {statusy(w)}")
-    return f"90 żądań: 429 u dostawcy = {n429}, czekanie p99 {pct([x['st'].get('czekanie') for x in w], 99):.1f} s"
+    oczekuj(ok + bp == 90 and ok >= 45, f"aplikacja: {statusy(w)} (w tym odrzuconych przez backpressure: {bp})")
+    return (f"90 żądań: 429 u dostawcy = {n429}, czekanie p99 {pct([x['st'].get('czekanie') for x in w], 99):.1f} s"
+            + (f", {bp} × 503 z backpressure (ćw. 12)" if bp else ""))
 
 
 def ex09():
