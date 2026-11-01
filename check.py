@@ -431,8 +431,9 @@ def ex12():
     krotkie, odrzucone_szybko = asyncio.run(run())
     cz = [x["st"].get("czekanie") for x in krotkie if x["status"] == 200]
     n503 = sum(1 for x in odrzucone_szybko if x["status"] == 503 and x["t"] < 0.5)
+    czek = f"czekanie p99 {pct(cz, 99):.1f} s" if cz else "żadne nie dostało odpowiedzi w 20 s (status 0 = timeout klienta)"
     oczekuj(len(cz) == 20 and pct(cz, 99) < 1.0,
-            f"krótkie przy 30 długich: {statusy(krotkie)}, czekanie p99 {pct(cz, 99):.1f} s — długie blokują wspólną pulę")
+            f"krótkie przy 30 długich: {statusy(krotkie)}, {czek} — długie blokują wspólną pulę")
     oczekuj(n503 > 0, "nadmiar długich nie dostał szybkiego 503 — kolejka bez limitu / bez budżetu czekania")
     info = ""
     p = os.path.join(REPO, "wyniki", "ex12-mieszany.json")
