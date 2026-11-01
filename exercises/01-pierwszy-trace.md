@@ -75,7 +75,8 @@ histogram czekania. Na tym pomiarze stoją wszystkie kolejne ćwiczenia.
    ```
    Drugie zapytanie zwraca żądania, które czekały dłużej niż 100 ms (atrybut jest liczbą zmiennoprzecinkową —
    TraceQL porównuje typy, więc `> 100` bez `.0` nie zwróci nic) — w trace dziura jest teraz
-   spanem `llm.queue_wait`, a obok niego (nie pod nim) leży `llm.call`.
+   spanem `llm.queue_wait`, a obok niego (nie pod nim) leży `llm.call`. Wyszukiwanie TraceQL widzi świeże
+   ślady z opóźnieniem (zmierzone: ~10 s po pętli 0 wyników, po ~30 s 40) — jeśli pusto, odczekaj i odśwież.
 9. **Explore → Prometheus** (RED + czekanie; metryki wysyłane co 5 s — odczekaj chwilę):
    ```
    sum by (endpoint, wynik) (rate(app_requests_total[1m]))
