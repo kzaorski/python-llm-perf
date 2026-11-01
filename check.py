@@ -147,11 +147,25 @@ def metryka_k6(dane: dict, nazwa: str, stat: str):
     return ((dane.get("metrics") or {}).get(nazwa) or {}).get("values", {}).get(stat)
 
 
-def wymagaj_aplikacji() -> None:
+def wymagaj_aplikacji(drain_s: float = 45.0) -> None:
+    """Aplikacja odpowiada i nie ma zaległości z poprzednich sond (inaczej pomiar byłby niewiarygodny)."""
     try:
-        httpx2.get(APP + "/diag/ping", timeout=3).raise_for_status()
+        httpx2.get(APP + "/diag/ping", timeout=5).raise_for_status()
     except Exception as e:  # noqa: BLE001
         raise Fail(f"aplikacja nie odpowiada na {APP} ({type(e).__name__}) — uruchom: uvicorn app.main:app --port 8060")
+    t_end = time.time() + drain_s
+    while True:
+        try:
+            k = httpx2.get(APP + "/diag", timeout=5).json()["kolejka"]
+        except Exception:  # noqa: BLE001 — starsza wersja /diag: nie sprawdzamy zaległości
+            return
+        zajete = sum(v["czekajace"] + v["w_toku"] for v in k.values())
+        if zajete == 0:
+            return
+        if time.time() > t_end:
+            raise Fail(f"aplikacja ma zaległość z wcześniejszego ruchu ({k}) — praca trwa mimo rozłączonych klientów "
+                       "(brak anulowania, ćw. 10?); zrestartuj aplikację i powtórz")
+        time.sleep(2)
 
 
 # ---------------------------------------------------------------- ćwiczenia
@@ -288,11 +302,29 @@ def ex08():
     try:
         mock("/admin/profile/limity", "POST")
         a0 = mock_odp()
-        w = ruch(claims("summary", 90), timeout=180)
+        w_toku_max = [0]
+
+        async def probkuj_i_wyslij():
+            async def probkuj():
+                async with httpx2.AsyncClient() as c:
+                    while True:
+                        try:
+                            k = (await c.get(APP + "/diag", timeout=5)).json()["kolejka"]["krotkie"]
+                            w_toku_max[0] = max(w_toku_max[0], k["w_toku"])
+                        except Exception:  # noqa: BLE001
+                            pass
+                        await asyncio.sleep(0.3)
+            tp = asyncio.create_task(probkuj())
+            r = await _ruch(claims("summary", 90), timeout=180)
+            tp.cancel()
+            return r
+        w = asyncio.run(probkuj_i_wyslij())
         d = roznica(a0, mock_odp())
     finally:
         mock_reset()
     n429, n200 = d.get("429", 0), d.get("200", 0)
+    oczekuj(w_toku_max[0] >= 16, f"sonda nie wysłała ruchu ponad limit dostawcy (max {w_toku_max[0]} wywołań naraz) — "
+                                 "za mało slotów (ćw. 06)? Limiter tempa sprawdzamy dopiero przy pełnej puli")
     ok = sum(1 for x in w if x["status"] == 200)
     oczekuj(n429 <= max(1, 0.01 * n200), f"atrapa zwróciła {n429}× 429 przy {n200}× 200 — brak limitera tempa; "
                                          f"aplikacja: {statusy(w)}")
@@ -314,6 +346,8 @@ def ex09():
         mock_reset()
     proby = sum(v for k, v in d.items() if k.isdigit())
     r = proby / len(w)
+    oczekuj(d.get("529", 0) > 0, f"sonda nie przeciążyła dostawcy (0 × 529, {statusy(w)}) — aplikacja wysyła za mało "
+                                 "naraz; czy pula slotów jest już dobrana (ćw. 06)?")
     oczekuj(r <= 1.5, f"{proby} prób HTTP na {len(w)} żądań = ×{r:.2f} (529: {d.get('529', 0)}) — ponowienia "
                       "nakładają się (SDK × aplikacja) i wracają falą")
     return f"×{r:.2f} prób na żądanie (529: {d.get('529', 0)}, 200: {d.get('200', 0)})"
@@ -377,14 +411,14 @@ def ex11():
 
 
 def ex12():
-    """40 długich (40 s) zajmuje swoją pulę; nadmiar długich dostaje szybkie 503; krótkie czekają < 1 s."""
+    """30 długich (15 s) zajmuje swoją pulę; nadmiar długich dostaje szybkie 503; krótkie czekają < 1 s."""
     wymagaj_aplikacji()
 
     async def run():
         limity = httpx2.Limits(max_connections=500, max_keepalive_connections=500)
         async with httpx2.AsyncClient(limits=limity) as c:
-            h = {"x-mock-total-s": "40", "x-mock-ttft-ms": "500"}
-            dlugie = [asyncio.create_task(_jedno(c, "POST", u, h, 45)) for u in claims("analysis", 40)]
+            h = {"x-mock-total-s": "15", "x-mock-ttft-ms": "500"}
+            dlugie = [asyncio.create_task(_jedno(c, "POST", u, h, 20)) for u in claims("analysis", 30)]
             await asyncio.sleep(2.5)
             krotkie = await asyncio.gather(*(_jedno(c, "POST", u, {}, 20) for u in claims("summary", 20)))
             gotowe = [d.result() for d in dlugie if d.done()]
@@ -396,7 +430,7 @@ def ex12():
     cz = [x["st"].get("czekanie") for x in krotkie if x["status"] == 200]
     n503 = sum(1 for x in odrzucone_szybko if x["status"] == 503 and x["t"] < 0.5)
     oczekuj(len(cz) == 20 and pct(cz, 99) < 1.0,
-            f"krótkie przy 40 długich: {statusy(krotkie)}, czekanie p99 {pct(cz, 99):.1f} s — długie blokują wspólną pulę")
+            f"krótkie przy 30 długich: {statusy(krotkie)}, czekanie p99 {pct(cz, 99):.1f} s — długie blokują wspólną pulę")
     oczekuj(n503 > 0, "nadmiar długich nie dostał szybkiego 503 — kolejka bez limitu / bez budżetu czekania")
     info = ""
     p = os.path.join(REPO, "wyniki", "ex12-mieszany.json")
@@ -421,7 +455,11 @@ def ex13():
                             pierwszy = time.perf_counter() - t0
                 return pierwszy, time.perf_counter() - t0
             return await asyncio.gather(*(jedno(random.randint(1, 20000)) for _ in range(5)))
-    w = asyncio.run(run())
+    try:
+        w = asyncio.run(run())
+    except httpx2.TimeoutException:
+        raise Fail("strumień nie wysłał nic przez 60 s (brak slotu albo zawieszony dostawca)") from None
+    oczekuj(all(a is not None for a, _ in w), "część strumieni nie zawierała zdarzenia delta")
     r = pct([a / b for a, b in w if a], 50)
     oczekuj(r < 0.3, f"pierwszy fragment po {pct([a for a, _ in w], 50):.2f} s przy całości {pct([b for _, b in w], 50):.2f} s"
                      f" ({r:.0%}) — odpowiedź buforowana przed wysłaniem")
@@ -505,6 +543,8 @@ def ex18():
             wyn.append(f"{w} ✓")
         except Fail as e:
             zle.append(f"{w}: {e}")
+        except Exception as e:  # noqa: BLE001
+            zle.append(f"{w}: błąd sondy {type(e).__name__}")
     oczekuj(not zle, " | ".join(zle))
     return ", ".join(wyn)
 
