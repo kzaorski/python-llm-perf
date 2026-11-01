@@ -19,8 +19,9 @@ async def z_ponowieniami(fn: Callable[[], Awaitable]):
     for proba in range(1, PROBY + 1):
         try:
             return await fn()
-        except (anthropic.RateLimitError, anthropic.InternalServerError, anthropic.APIConnectionError):
-            # InternalServerError obejmuje 5xx i 529 overloaded; APIConnectionError — także timeouty
+        except (anthropic.RateLimitError, anthropic.OverloadedError, anthropic.InternalServerError,
+                anthropic.APIConnectionError):
+            # 429, 529 overloaded, 5xx; APIConnectionError obejmuje też timeouty (APITimeoutError)
             if proba == PROBY:
                 raise
             await asyncio.sleep(PRZERWA_S)

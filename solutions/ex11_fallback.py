@@ -25,7 +25,7 @@ CZAS_OTWARCIA_S = float(os.environ.get("CB_OTWARCIE_S", "30"))
 
 
 def _awaria(e: Exception) -> bool:
-    if isinstance(e, anthropic.InternalServerError) and getattr(e, "status_code", 0) == 529:
+    if isinstance(e, anthropic.OverloadedError):
         return False   # 529 overloaded = przeciążenie, nie awaria — fallback przeniósłby burzę na `b`
     return isinstance(e, BLEDY_AWARII)
 

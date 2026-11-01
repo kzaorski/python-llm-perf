@@ -45,7 +45,8 @@ def _budzet_pozwala() -> bool:
 def _do_ponowienia(e: Exception) -> bool:
     if isinstance(e, (anthropic.APITimeoutError, httpx2.TimeoutException)):
         return False                     # timeout ≠ chwilowy błąd (patrz docstring)
-    return isinstance(e, (anthropic.RateLimitError, anthropic.InternalServerError, anthropic.APIConnectionError))
+    return isinstance(e, (anthropic.RateLimitError, anthropic.OverloadedError, anthropic.InternalServerError,
+                          anthropic.APIConnectionError))
 
 
 def _przerwa(e: Exception, proba: int) -> float:

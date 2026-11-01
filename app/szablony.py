@@ -38,7 +38,8 @@ def pismo(n: int, request: Request):   # W2: `def` → pula wątków anyio (40)
     t0 = time.perf_counter()
     z = dane.zgloszenie(n)
     m = _klient_sync.messages.create(model=config.LLM_MODEL, max_tokens=300,
-                                     messages=[{"role": "user", "content": _prompt(z)}])
+                                     messages=[{"role": "user", "content": _prompt(z)}],
+                                     extra_headers=obsluga.naglowki_atrapy(request) or None)
     tekst = "".join(b.text for b in m.content if b.type == "text")
     obsluga.zapisz_wynik(request, "letter", "krotkie", "ok", t0, {"llm": time.perf_counter() - t0})
     return {"zgloszenie": z["id"], "pismo": renderuj(z, tekst)}

@@ -10,14 +10,18 @@ Obecny stan (celowe wady, zmierzone w Bloku B):
 """
 from __future__ import annotations
 
+import os
 import time
 
 import anthropic
+import httpx2
 
 from .. import config, stan, telemetry
 from . import Wynik, Zadanie, limiter
 
 ADRESY = {"a": config.LLM_BASE_URL, "b": config.LLM_FALLBACK_BASE_URL}
+# Rozmiar puli połączeń httpx2 na dostawcę (0 = domyślna SDK: 1000). Ćw. 06 — wariant „pula < semafor".
+POLACZENIA = int(os.environ.get("LLM_POLACZENIA", "0"))
 
 
 # ---------------------------------------------------------------- infrastruktura pomiaru (nie zmieniaj)
@@ -33,6 +37,8 @@ def _http(dostawca: str, **kw):
         if dostawca == "a":
             limiter.aktualizuj_z_naglowkow(response.status_code, response.headers)
 
+    if POLACZENIA:     # ćw. 06: pula połączeń httpx2 mniejsza niż semafor → czekanie w puli / PoolTimeout
+        kw["limits"] = httpx2.Limits(max_connections=POLACZENIA, max_keepalive_connections=POLACZENIA)
     return anthropic.DefaultAsyncHttpxClient(event_hooks={"request": [przy_zadaniu], "response": [przy_odpowiedzi]},
                                              **kw)
 

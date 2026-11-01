@@ -37,7 +37,8 @@ def _kategoria(tekst: str, n: int) -> str:
 async def klasyfikuj(n: int, request: Request):
     t0 = time.perf_counter()
     m = _klient_sync.messages.create(model=config.LLM_MODEL, max_tokens=16, system=SYSTEM,
-                                     messages=[{"role": "user", "content": _prompt(n)}])   # W1: blokuje pętlę
+                                     messages=[{"role": "user", "content": _prompt(n)}],
+                                     extra_headers=obsluga.naglowki_atrapy(request) or None)   # W1: blokuje pętlę
     tekst = "".join(b.text for b in m.content if b.type == "text")
     obsluga.zapisz_wynik(request, "classify", "krotkie", "ok", t0, {"llm": time.perf_counter() - t0})
     return {"zgloszenie": dane.zgloszenie(n)["id"], "kategoria": _kategoria(tekst, n)}
