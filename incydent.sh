@@ -55,7 +55,15 @@ case "${1:-}" in
     docker compose run --rm -e WYNIK=incydent k6 run -o experimental-prometheus-rw /scripts/incydent.js
     ;;
   stop)
-    if [ -f "$PIDF" ]; then kill "$(cat $PIDF)" 2>/dev/null || true; rm -f "$PIDF"; fi
+    if [ -f "$PIDF" ]; then
+      P=$(cat "$PIDF")
+      kill "$P" 2>/dev/null || true
+      # uvicorn po SIGTERM czeka na żądania w toku (w incydentach bywają minutowe) — po 5 s dobijamy
+      for _ in $(seq 1 25); do kill -0 "$P" 2>/dev/null || break; sleep 0.2; done
+      kill -9 "$P" 2>/dev/null || true
+      for _ in $(seq 1 25); do lsof -tiTCP:8060 -sTCP:LISTEN >/dev/null 2>&1 || break; sleep 0.2; done
+      rm -f "$PIDF"
+    fi
     curl -s -X POST 127.0.0.1:8061/admin/reset >/dev/null || true
     echo "incydent zatrzymany, atrapa zresetowana"
     ;;
