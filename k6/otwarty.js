@@ -8,7 +8,7 @@
 //   z pulą VU wystarczającą, by k6 nie gubił iteracji (metryka dropped_iterations musi zostać 0).
 //   Tag modelu: model="otwarty".
 import http from 'k6/http';
-import { APP, zapisz, podsumowanie } from './lib.js';
+import { APP, zapisz, podsumowanie } from '/scripts/lib.js';  // ścieżka w kontenerze k6 (./k6 → /scripts)
 
 const RATE = parseInt(__ENV.RATE || '4');
 

@@ -8,7 +8,7 @@
 #   - workers = kilka (2) — po to, by wykorzystać więcej niż jeden rdzeń na CPU (JSON, TLS, telemetria)
 #     i przetrwać awarię procesu; NIE po to, by zwiększyć liczbę równoległych wywołań LLM;
 #   - limity współbieżności wobec dostawcy dzielą się między procesy (semafor jest per proces!):
-#     LLM_SLOTY=16 na proces × 2 = 32, tyle co w wariancie jednoprocesowym;
+#     LLM_SLOTY=32 na proces × 2 = 64 = moc atrapy (sumę trzymaj ≤ mocy/limitu dostawcy);
 #   - timeout: dla UvicornWorker to limit heartbeatu procesu (pętla zablokowana > timeout → restart),
 #     a nie czasu żądania — wielominutowe wywołania LLM go nie wyzwalają (zmierzone w ćw. 07).
 import os
@@ -19,4 +19,4 @@ workers = int(os.environ.get("GUNICORN_WORKERS", "2"))
 bind = f"127.0.0.1:{os.environ.get('APP_GUNICORN_PORT', '8062')}"
 timeout = 30
 graceful_timeout = 30
-raw_env = ["APP_WARIANT=gunicorn-uvicorn", f"LLM_SLOTY={os.environ.get('LLM_SLOTY_NA_PROCES', '16')}"]
+raw_env = ["APP_WARIANT=gunicorn-uvicorn", f"LLM_SLOTY={os.environ.get('LLM_SLOTY_NA_PROCES', '32')}"]

@@ -63,13 +63,32 @@ for r in (klasyfikacja.router, szablony.router, strumien.router, cache.router, w
     app.include_router(r)
 
 
-@app.middleware("http")
-async def server_timing(request: Request, call_next):
-    resp = await call_next(request)
-    st = obsluga.server_timing(getattr(request.state, "czasy", None))
-    if st:
-        resp.headers["server-timing"] = st
-    return resp
+class ServerTiming:
+    """Czyste middleware ASGI: dokleja Server-Timing z request.state.czasy (scope["state"]).
+
+    Celowo NIE @app.middleware("http") (BaseHTTPMiddleware): ono podmienia `receive`, przez co
+    `request.is_disconnected()` w handlerze nie widzi rozłączenia klienta (zmierzone w Bloku B).
+    """
+
+    def __init__(self, app_):
+        self.app = app_
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+
+        async def wyslij(msg):
+            if msg["type"] == "http.response.start":
+                st = obsluga.server_timing((scope.get("state") or {}).get("czasy"))
+                naglowki = list(msg.get("headers", []))
+                if st and not any(k.lower() == b"server-timing" for k, _ in naglowki):
+                    naglowki.append((b"server-timing", st.encode()))
+                    msg = {**msg, "headers": naglowki}
+            await send(msg)
+        await self.app(scope, receive, wyslij)
+
+
+app.add_middleware(ServerTiming)
 
 
 FastAPIInstrumentor.instrument_app(app, excluded_urls="/diag/ping")

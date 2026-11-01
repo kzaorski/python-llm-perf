@@ -6,7 +6,7 @@
 //
 // [ROZWIĄZANIE ćw. 02 — kopiuj do k6/otwarty.js]
 import http from 'k6/http';
-import { APP, zapisz, podsumowanie } from './lib.js';
+import { APP, zapisz, podsumowanie } from '/scripts/lib.js';  // ścieżka w kontenerze k6 (./k6 → /scripts)
 
 const RATE = parseInt(__ENV.RATE || '4');
 
