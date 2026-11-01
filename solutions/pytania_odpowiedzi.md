@@ -203,10 +203,10 @@ inne w szczegółach — ważny jest kierunek i rząd wielkości.
 - **Naprawa:** `async def` + asynchroniczny klient (ćw. 05); `check.py ex05` PASS.
 
 ### Mini-III (po bloku III) — „dostawca: przeciążacie nas”
-- **Objaw:** dostawca widzi kilka razy więcej żądań niż użytkowników, falami; część odpowiedzi 502.
-- **Ślad:** `sum(increase(llm_http_attempts_total[2m])) / sum(increase(app_requests_total{endpoint="summary"}[2m]))`
-  > 1.5; u atrapy dużo 529; `/diag` → `klienci.krotkie.max_retries` = 2 (SDK ponawia) plus ponowienia aplikacji
-  bez jittera (wyrównane fale).
+- **Objaw:** dostawca widzi ~3× więcej żądań niż użytkowników, falami; część odpowiedzi 502 (u mnie 24/201).
+- **Ślad:** `/diag` → 625 prób HTTP na 201 żądań (×3.11); u atrapy 448 × 529 przy 177 × 200; `/diag` →
+  `klienci.krotkie.max_retries` = 2 (SDK ponawia) plus ponowienia aplikacji bez jittera (wyrównane fale);
+  `check.py ex09`: ×2.40.
 - **Przyczyna:** dwie warstwy ponowień (SDK × aplikacja) bez budżetu i jittera przy przeciążonym dostawcy.
 - **Naprawa:** jedna warstwa (SDK `max_retries=0`), pełny jitter, `retry-after`, budżet 20% (ćw. 09);
   `check.py ex09` PASS (u mnie ×1.20).

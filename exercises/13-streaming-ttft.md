@@ -94,10 +94,14 @@ zawsze wtedy, gdy dział analiz zleca serię analiz dokumentacji.
    curl -s -o /dev/null -w 'krótkie: %{http_code} po %{time_total} s\n' -X POST 127.0.0.1:8060/claims/1/summary
    curl -s 127.0.0.1:8060/diag | python -m json.tool | head -14
    ```
-   ⟨MINI4⟩
+   U mnie: `krótkie: 503 po 5.0 s`; `/diag` → `kolejka.dlugie`: **32 w toku + 8 czeka** (najstarsze 8.1 s),
+   `kolejka.krotkie`: 0 w toku; lag pętli w normie.
 3. Odpowiedz bez kodu: ile slotów zajmują długie, ile ma krótkie (`kolejka` w `/diag`,
    `llm_inflight` per klasa)? Czy limit kolejki i budżet czekania działają? Czego brakuje?
-4. `python check.py ex12` — FAIL na incydencie. Potem `./incydent.sh stop` (zabija też analizy w toku).
+4. Poczekaj, aż analizy w tle się skończą (~1 min; `wait` w tym samym terminalu) — inaczej check zgłosi
+   „zaległość z wcześniejszego ruchu” zamiast właściwej diagnozy. Potem `python check.py ex12` — FAIL na
+   incydencie (u mnie: „krótkie przy 30 długich: {200: 11, 503: 9}, czekanie p99 4.9 s — długie blokują wspólną
+   pulę”). Na koniec `./incydent.sh stop`.
 
 Odpowiedź: `solutions/pytania_odpowiedzi.md`, sekcja „Mini-incydenty”.
 

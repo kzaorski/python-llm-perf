@@ -95,7 +95,9 @@ niż macie użytkowników, i to falami. U was ruch to ~10 streszczeń/s.
    curl -s 127.0.0.1:8061/admin/stats | python -m json.tool | head -20
    ```
    Prometheus: `sum(increase(llm_http_attempts_total[2m])) / sum(increase(app_requests_total{endpoint="summary"}[2m]))`.
-   ⟨MINI3⟩
+   U mnie: k6 177 × 200 + 24 × 502, p99 6.3 s; `/diag`: **625 prób HTTP na 201 żądań = 3.11**; atrapa
+   177 × 200 i **448 × 529**; `/diag` → `klienci.krotkie`: `max_retries` 2, read 600 s. `check.py ex09`:
+   FAIL „×2.40 (529: 143)”.
 3. Odpowiedz bez kodu: ile prób HTTP na żądanie? Ile z nich to 529? Która warstwa ponawia (sprawdź
    `/diag` → `klienci`) i czy ponowienia coś ratują?
 4. `python check.py ex09` — FAIL na incydencie. Potem `./incydent.sh stop`.

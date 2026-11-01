@@ -100,7 +100,10 @@ while true; do curl -s 127.0.0.1:8061/admin/stats | python -c "import json,sys; 
 8. Restart (`LLM_FALLBACK=0`) i powtórka A, B, C (przed A znów `PATCH … early_start/ping`).
    U mnie, powtórka C dokładnie poleceniem z kroku 5: **60 × 504 po 15.0–15.1 s**, ostatnia po 54 s od startu
    pętli (30 s wysyłania + 15 s + narzut curl); atrapa: **59 × `cancelled_generating`** (60. przerwana chwilę
-   później); `/diag` → `klienci`: krótkie `max_retries` 0, read 15 s; długie `max_retries` 0, read 60 s. ⟨E10-AB-PO⟩
+   później); `/diag` → `klienci`: krótkie `max_retries` 0, read 15 s; długie `max_retries` 0, read 60 s.
+   Powtórka A: **4 × 200 po 122.2 s**, atrapa 4 × 200, 0 porzuconych. Powtórka B: k6 rezygnuje po 20.0 s, a
+   `generating` u atrapy spada z 6 do **0** w próbce 2 s później (`pomiar.py` próbkuje co ~2 s);
+   **6 × `cancelled_generating`**.
 
    U mnie:
 
