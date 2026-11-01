@@ -108,7 +108,8 @@ przy ~4 zgłoszeniach/s klienci skarżą się na odpowiedzi po 3 s i dłużej.
    docker compose run --rm k6 run -o experimental-prometheus-rw /scripts/zamkniety.js -e VUS=4 -e PAUZA_S=0 -e CZAS=30s
    docker compose run --rm k6 run -o experimental-prometheus-rw /scripts/otwarty.js -e RATE=4 -e CZAS=30s
    ```
-   U mnie: zamknięty 3.69/s, p99 **1.60 s**, czekanie 0; otwarty 3.65/s, p99 **2.87 s**, czekanie p99 1.75 s.
+   U mnie: zamknięty 3.69/s, p99 **1.61 s**, czekanie 0; otwarty 121 żądań w 30 s (k6 liczy tempo z opróżnianiem:
+   2.63/s), p99 **2.58 s**, czekanie p99 1.46 s; `check.py ex06`: czekanie na slot p50 21.3 s / p99 42.7 s przy LLM 1.07 s.
 3. Odpowiedz na podstawie metryk (bez kodu): gdzie żądania tracą czas? Który zasób jest nasycony
    i jak to widać (`llm_inflight`, `llm_queue_wait_seconds`, `mock_llm_generating`)? Dlaczego raport
    zespołu tego nie pokazał? Ile slotów potrzeba na 4/s z zapasem, a ile na docelowe 20/s?

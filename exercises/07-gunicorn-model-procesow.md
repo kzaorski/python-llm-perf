@@ -103,7 +103,8 @@ pism generuje się ~2 s, a część ~4 s — nigdy pośrodku. Klasyfikacje i str
      -H 'x-mock-ttft-ms: 2000' -H 'x-mock-total-s: 0.1' 127.0.0.1:8060/claims/{}/letter | sort -n | awk '{printf "%.2f ", $1} END {print ""}'
    curl -s -o /dev/null -w 'ping: %{time_total}\n' 127.0.0.1:8060/diag/ping
    ```
-   ⟨MINI2⟩
+   U mnie: 60 × 200; najszybsze 2.27 s, mediana 2.45 s, najwolniejsze 4.54 s — dwie grupy (~2.3 s i ~4.4 s);
+   ping w trakcie fali 1.3 ms. `check.py ex05`: „20 z 60 żądań czekało na drugą falę (min 2.16 s, max 4.36 s)”.
 3. Odpowiedz bez kodu: ile żądań w pierwszej fali? Czy pętla zdarzeń stoi (ping)? Czy to semafor LLM
    (`/diag` → `kolejka`)? Jaki zasób ma dokładnie taki limit?
 4. Sprawdzenie: `python check.py ex05` — FAIL na incydencie.

@@ -39,3 +39,20 @@ uvicorn --app-dir .run/do-12 app.main:app --port 8060
 ```
 
 Na tym stoją `./smoke.sh` (regresja `check.py --all` na rozwiązaniach) i `./incydent.sh` (finał).
+
+## Utknąłeś? Kolejność ratunku
+
+1. `hints/exNN_hint1.md` — kierunek (bez kodu),
+2. `hints/exNN_hint2.md` — które API / metryka / zapytanie,
+3. `hints/exNN_hint3.md` — pseudokod,
+4. dopiero potem: skopiuj gotowy moduł (tabela powyżej) albo uruchom stan „po ćwiczeniu NN” (`nakladka.py`).
+
+Podpowiedzi są dla wszystkich 18 ćwiczeń (także 03 i 17, które nie zmieniają kodu, i dla finału 18).
+
+## Pozostałe pliki
+
+- `pytania_odpowiedzi.md` — klucz do pytań kontrolnych ćw. 01–18 i do mini-incydentów I–IV; zaglądaj PO
+  własnej próbie odpowiedzi.
+- `ex18_odpowiedzi.md` — klucz do finału (objaw → ślad → przyczyna → naprawa dla każdej usterki, interakcje,
+  wykluczenia) + rubryka samooceny. Otwórz dopiero PO napisaniu własnego raportu.
+- `todo.md` — pomysły na rozszerzenia kursu (kolejne wady i ćwiczenia).
