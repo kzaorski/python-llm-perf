@@ -38,6 +38,9 @@ WADY = {
     "W13": ("gunicorn", 7), "W15": ("zadania", 14), "W16": ("wywolanie", 10), "W17": ("klient", 10),
     "W18": ("limiter", 12),
 }
+# wady, których naprawa zmienia więcej niż jeden moduł: dodatkowe moduły cofane razem z główną
+# (W5: ćw. 09 zmienia też klient.py — `max_retries=0`; bez tego cofnięta W5 nie mnoży prób przez SDK)
+WADY_DODATKOWE = {"W5": [("klient", 9)]}
 _WZOR = re.compile(r"^ex(\d\d)_(\w+?)\.(py)$")
 
 
@@ -55,8 +58,8 @@ def plan(do: int, wady: list[str]) -> dict[str, str | None]:
     roz = rozwiazania()
     limit = {m: do for m in MODULY}
     for w in wady:
-        mod, cw = WADY[w]
-        limit[mod] = min(limit[mod], cw - 1)
+        for mod, cw in [WADY[w], *WADY_DODATKOWE.get(w, [])]:
+            limit[mod] = min(limit[mod], cw - 1)
     out = {}
     for mod in MODULY:
         kandydaci = [f for n, f in roz.get(mod, []) if n <= limit[mod]]
