@@ -52,7 +52,16 @@ obrazu. k6 dociera do hosta przez `host.docker.internal`.
 
 0. Własny branch na pracę: `git switch -c moje-cwiczenia` — ćwiczenia modyfikują pliki aplikacji; czysty
    `main` to darmowy reset, a `git diff main` pokaże na końcu wszystko, co zbudowałeś/aś.
-1. Stos: `docker compose up -d --wait` (projekt `llmperf`: `lgtm`, `redis`, `mock-llm`) →
+1. Zbuduj lokalny obraz atrapy LLM i uruchom stos (z katalogu głównego repozytorium):
+   ```bash
+   docker compose build mock-llm
+   docker compose up -d --wait
+   ```
+   Obraz `llmperf-mock-llm:1.1` jest budowany z katalogu `mock_llm/` — nie jest opublikowany
+   na Docker Hubie. Na nowym komputerze najpierw wykonaj krok budowania; pominięcie go może
+   spowodować komunikat `pull access denied for llmperf-mock-llm`. Powtórz budowanie po zmianach
+   w kodzie atrapy lub jej Dockerfile.
+   Stos (projekt `llmperf`): `lgtm`, `redis`, `mock-llm` →
    Grafana http://127.0.0.1:3060 (admin/admin).
 2. Środowisko: `python -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt`
    (albo `uv venv && uv pip install -r requirements.txt`).
