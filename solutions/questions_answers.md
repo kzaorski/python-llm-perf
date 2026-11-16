@@ -146,43 +146,43 @@ inne w szczegółach — ważny jest kierunek i rząd wielkości.
    check the generator finishes, the call is cancelled, the slot returns, and the provider stops generating
    (`mock_llm_cancelled_total`).
 
-## Ćw. 14 — kolejka zadań
-1. Nie: przy 2 × 100 „szybko” oznaczało 179/200 błędów 529. 2 × 4 = 8 = moc dostawcy, więc przepustowość
-   ≈ 8 / W (u mnie ~7 zadań/s) — dokładnie tyle, ile dostawca może dać. Little: L = λ·W, przy L ograniczonym
-   mocą dostawcy szybszego λ nie ma; nadwyżka czeka w kolejce, gdzie jest widoczna (lag 190 → 0).
-2. Pierwszy worker pobierze (prefetch) do 100 wpisów: `pending` w jego grupie prawie równe liczbie zadań, drugi
-   bezczynny. Ostatnie zadanie skończy się, gdy pierwszy przerobi całą swoją pulę — czas jak dla jednego workera,
-   a `lag` = 0, więc autoskalowanie po lagu nie zadziała.
-3. Na wiek najstarszego nieodebranego (np. > 60 s przez 5 min — wg obietnicy dla klienta). Długość kolejki
-   nie mówi nic bez tempa obsługi (1000 zadań po 10 ms to nic, 50 po 4 min to godzina); wiek mówi wprost, jak
-   długo czeka ktoś, kto czeka najdłużej.
+## Ex. 14 — the task queue
+1. No: with 2 × 100, "fast" meant 179/200 errors of 529. 2 × 4 = 8 = the provider's capacity, so throughput
+   ≈ 8 / W (in my run ~7 tasks/s) — exactly as much as the provider can give. Little: L = λ·W, with L capped
+   by the provider's capacity there is no faster λ; the excess waits in the queue, where it is visible (lag 190 → 0).
+2. The first worker will fetch (prefetch) up to 100 entries: `pending` in its group is almost equal to the number of tasks, the second
+   one is idle. The last task finishes when the first has worked through its entire pool — the time of a single worker,
+   and `lag` = 0, so autoscaling on lag will not work.
+3. On the age of the oldest undelivered task (e.g. > 60 s for 5 min — according to the promise made to the customer). Queue length
+   says nothing without the service rate (1000 tasks of 10 ms is nothing, 50 of 4 min is an hour); age says directly how
+   long the one who has been waiting the longest has waited.
 
-## Ćw. 15 — cache stampede
-1. Zamiast 50 wywołań walczących o 32 sloty (część czekała na slot) jest jedno wywołanie, a 49 czeka tylko na
-   jego wynik — nikt nie stoi w kolejce do semafora, więc p99 ≈ czas jednego wywołania.
-2. Słownik `Future` żyje w pamięci jednego procesu. Drugi proces gunicorna ma własny słownik i własne chybienie,
-   więc przy N procesach masz do N wywołań. Między procesami potrzebny jest wspólny punkt: blokada w Redisie.
-3. Blokada wygaśnie, kolejne żądanie zdobędzie ją i zacznie liczyć drugi raz (dwa wywołania). Dlatego TTL
-   blokady > deadline wywołania (rozwiązanie: 30 s = deadline krótkich), a czekający po wygaśnięciu liczą sami.
+## Ex. 15 — cache stampede
+1. Instead of 50 calls fighting for 32 slots (some waited for a slot) there is one call, and 49 wait only for
+   its result — nobody stands in the queue for the semaphore, so p99 ≈ the time of one call.
+2. The `Future` dictionary lives in the memory of one process. The second gunicorn process has its own dictionary and its own miss,
+   so with N processes you get up to N calls. Across processes you need a shared point: a lock in Redis.
+3. The lock will expire, the next request will acquire it and start computing a second time (two calls). That is why the lock's TTL
+   > the call's deadline (the solution: 30 s = the deadline of the short calls), and after expiry the waiters compute on their own.
 
-## Ćw. 16 — batching
-1. Dobry, bo każde z 146 wywołań jest małe i krótkie (wsad ≤ 5), a pojedyncza prośba nie czeka 2 s na okno —
-   latencja spadła z 2.78 do 0.54 s, a liczba wywołań i tak jest kilkukrotnie mniejsza niż liczba próśb. Zły
-   byłby przy twardym limicie RPM (wtedy liczba wywołań jest zasobem krytycznym) albo przy dużym wspólnym
-   prompcie systemowym, którego koszt chcesz dzielić na wiele zgłoszeń.
-2. Wsad 100 potrzebuje naraz ~100× tokenów wejścia — przy 20% limitu dostaje 429 (albo czeka w limiterze) cały,
-   wszyscy 100 klientów naraz. Wsad 5 zmieści się w resztce limitu; 429 dotyka najwyżej 5.
-3. Okno ograniczone budżetem SLO (np. ≤ 50–100 ms z 1 s) i rozmiar ograniczony z góry; przy małym ruchu wysyłaj
-   natychmiast (okno adaptacyjne — bonus), przy dużym zbieraj do limitu rozmiaru. Sprawdź oba końce pomiarem.
+## Ex. 16 — batching
+1. Good, because each of the 146 calls is small and short (batch ≤ 5), and a single request does not wait 2 s for the window —
+   latency dropped from 2.78 to 0.54 s, and the number of calls is still several times smaller than the number of requests. It would
+   be bad with a hard RPM limit (then the number of calls is the critical resource) or with a large shared
+   system prompt whose cost you want to split across many claims.
+2. A batch of 100 needs ~100× the input tokens at once — with 20% of the limit left it gets a 429 (or waits in the limiter) as a whole,
+   all 100 customers at once. A batch of 5 fits in what remains of the limit; a 429 hits at most 5.
+3. A window bounded by the SLO budget (e.g. ≤ 50–100 ms out of 1 s) and a size capped from above; under low traffic send
+   immediately (an adaptive window — the bonus), under high traffic collect up to the size limit. Check both ends by measuring.
 
-## Ćw. 17 — atrapa vs Claude
-1. Test pod obciążeniem na prawdziwym API kosztuje (każde żądanie płatne), zależy od limitów konta i wpływa na
-   innych użytkowników tego konta; nie da się go powtarzalnie wywołać (429, 529 nie na zawołanie). Sekwencyjny
-   pomiar daje W i jego rozkład — to wejście do modelu pojemności; zachowanie pod obciążeniem ćwiczysz na atrapie.
-2. Read timeout ma wykrywać awarię, nie ogon: wielokrotność najdłuższej obserwowanej ciszy (np. 5–10× → 5–15 s
-   dla krótkich, jak w ćw. 10). 1.2 s ucinałby zwykły ogon w gorszej godzinie i zamieniał go w błędy.
-3. W ≈ TTFT + 700 / tempo: przy 225 tok/s ~3.6 s, przy 250 ~3.3 s, przy 301 ~2.8 s. Sloty = λ·W — różnica tempa
-   o ±20% to ±20% slotów przy tym samym ruchu.
+## Ex. 17 — mock vs Claude
+1. A load test on the real API costs money (every request is paid for), depends on the account limits and affects
+   the other users of that account; it cannot be triggered repeatably (a 429 or 529 on demand is not possible). A sequential
+   measurement gives W and its distribution — the input to the capacity model; you practice behavior under load on the mock.
+2. The read timeout is meant to detect a failure, not the tail: a multiple of the longest observed silence (e.g. 5–10× → 5–15 s
+   for the short calls, as in ex. 10). 1.2 s would cut off an ordinary tail in a worse hour and turn it into errors.
+3. W ≈ TTFT + 700 / rate: at 225 tok/s ~3.6 s, at 250 ~3.3 s, at 301 ~2.8 s. Slots = λ·W — a rate difference
+   of ±20% is ±20% of slots at the same traffic.
 
 ## Ćw. 18 — finał
 1. Zobacz `solutions/ex18_odpowiedzi.md`: `llm_inflight{klasa="krotkie"}` przyklejone do 4 przy niedociążonym
