@@ -10,6 +10,11 @@ measuring and fixing them is the content of the 18 exercises.
 > gunicorn 26.2.0 + uvicorn-worker 0.4.0, anthropic 2.3.0 (httpx2 2.16.0), opentelemetry-sdk 1.45.2
 > (instrumentations 0.66b2), pyroscope-io 1.4.0, taskiq 0.13.0 + taskiq-redis 1.2.4, redis-py 8.1.0,
 > images `grafana/otel-lgtm:0.39.0`, `grafana/k6:2.3.0`, `redis:8.8.4-alpine`, mock LLM 1.1 (`python:3.13.18-slim-trixie`).
+> English version (`english` branch), smoke test from scratch (2026-11-16, fresh clone, Python **3.11.17**, README
+> executed literally; installed fastapi 0.163.1, anthropic 2.9.0, starlette 1.10.0, uvicorn 0.54.0, gunicorn 26.2.0,
+> opentelemetry-sdk 1.45.2, taskiq 0.13.0, redis-py 8.1.0): first `docker compose up -d --wait` ~5 s (images cached),
+> `check.py --all` on the skeleton: 16 × FAIL + ex18 FAIL + SKIP ex17, no exceptions (~11 min); `./smoke.sh` on the
+> solutions, run twice: 17 × PASS + SKIP ex17 each time (~6.7 min per run).
 > Smoke test from scratch (2026-11-01, fresh clone, Docker Desktop on macOS, arm64): a fresh install on Python
 > **3.11.17** (the lowest supported) and 3.13.13; the first `docker compose up -d --wait` on empty volumes ~10 s
 > (images cached, no pulling), `pip install` + data ~20 s; ex. 1 and 12 (the 180 s runs A and B) executed
