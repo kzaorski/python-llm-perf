@@ -1,6 +1,6 @@
-# Ćw. 02 — podpowiedź 2 (API)
+# Ex. 02 — hint 2 (API)
 
-Executor `constant-arrival-rate`: `rate` (ile iteracji), `timeUnit` (`'1s'`), `duration`, `preAllocatedVUs`,
-`maxVUs`. VU w tym modelu to tylko „robotnicy” do wysyłania — potrzeba ich ≈ tempo × najdłuższy czas
-odpowiedzi (Little). Sprawdzaj `dropped_iterations` w podsumowaniu (i `k6_dropped_iterations_total` w
-Prometheusie) — musi być 0. Tag `model: 'otwarty'` (już jest w pliku) pozwala porównać serie w Prometheusie; `gracefulStop` > najdłuższe żądanie.
+The `constant-arrival-rate` executor: `rate` (how many iterations), `timeUnit` (`'1s'`), `duration`, `preAllocatedVUs`,
+`maxVUs`. In this model VUs are just "workers" that do the sending — you need ≈ rate × the longest response time
+(Little). Check `dropped_iterations` in the summary (and `k6_dropped_iterations_total` in
+Prometheus) — it must be 0. The tag `model: 'open'` (already in the file) lets you compare series in Prometheus; `gracefulStop` > the longest request.

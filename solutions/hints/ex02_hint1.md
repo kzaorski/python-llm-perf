@@ -1,5 +1,6 @@
-# Ćw. 02 — podpowiedź 1 (kierunek)
+# Ex. 02 — hint 1 (direction)
 
-Model zamknięty: liczba „użytkowników” (VU) jest stała, każdy czeka na odpowiedź, zanim wyśle następne
-żądanie — tempo zależy od systemu. Model otwarty: żądania przychodzą w zadanym tempie niezależnie od tego,
-czy poprzednie się skończyły. W k6 to różnica **executora** scenariusza, nie kodu funkcji `default`.
+Closed model: the number of "users" (VUs) is fixed, and each waits for the response before sending the next
+request — the rate depends on the system. Open model: requests arrive at a given rate regardless of whether
+the previous ones have finished. In k6 this is a difference in the scenario's **executor**, not in the code of
+the `default` function.

@@ -1,6 +1,6 @@
-# Ćw. 03 — podpowiedź 3 (obliczenie)
+# Ex. 03 — hint 3 (calculation)
 
-1. Odczytaj W (p50 `llm_call_duration_seconds`) i λ docelowe (np. 20/s).
-2. Potrzebne sloty L = λ·W (+ zapas na ogon: licz z p90/p99 W, nie ze średniej).
-3. Sprawdź rampą: przy λ poniżej kolana czekanie p90 ≈ 0, powyżej rośnie z każdym krokiem.
-Do checka wystarczy `wyniki/ex03-rampa.json` z ≥ 200 żądaniami (`python check.py ex03`).
+1. Read W (the p50 of `llm_call_duration_seconds`) and the target λ (e.g. 20/s).
+2. The slots you need: L = λ·W (+ headroom for the tail: compute from the p90/p99 of W, not the average).
+3. Verify with a ramp: below the knee the wait p90 ≈ 0, above it it grows with every step.
+For the check, a `results/ex03-ramp.json` with ≥ 200 requests is enough (`python check.py ex03`).

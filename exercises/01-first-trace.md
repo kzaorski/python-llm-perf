@@ -1,112 +1,122 @@
-# Ćwiczenie 1: Pierwszy trace — gdzie żądanie czeka, a gdzie pracuje
+# Exercise 1: The first trace — where a request waits and where it works
 
-> Czas: ~45 min (w tym ~15 min na pierwsze uruchomienie stosu)
+> Time: ~45 min (including ~15 min for the first stack startup)
 
-> Blok I — Pomiar i teoria kolejek (ćw. 1–3). Zanim zaczniesz, przeczytaj `00-teoria.md`
-> (przynajmniej „Czekanie vs obsługa” i „Jak czytać trace, metryki i profil w tym kursie”).
-> Czytanka bloku: `01a-teoria-kolejek-w-praktyce.md`.
+> Block I — Measurement and queueing theory (ex. 1–3). Before you start, read `00-theory.md`
+> (at least "Waiting vs service" and "How to read traces, metrics and profiles in this course").
+> Block reading: `01a-queueing-theory-in-practice.md`.
 
-## Cel
-Uruchamiasz aplikację „asystenta likwidatora szkód”, oglądasz trace jednego streszczenia
-zgłoszenia i dopisujesz brakujący pomiar: **czas czekania na slot LLM**. Po ćwiczeniu każdy trace
-pokazuje osobno czekanie (span `llm.queue_wait`) i obsługę (span `llm.call`), a Prometheus ma
-histogram czekania. Na tym pomiarze stoją wszystkie kolejne ćwiczenia.
+## Goal
+You start the "claims adjuster's assistant" application, look at the trace of a single claim
+summary, and add the missing measurement: **the time a request waits for an LLM slot**. After the
+exercise every trace shows waiting (span `llm.queue_wait`) and service (span `llm.call`) separately,
+and Prometheus has a waiting-time histogram. Every later exercise builds on this measurement.
 
-## Teoria w pigułce
-- **Czas odpowiedzi = czekanie + obsługa.** Obsługa to praca wykonywana dla żądania (tu: wywołanie
-  LLM), czekanie to stanie w kolejce przed nią (tu: na wolny slot semafora). Intuicja: kolejka do
-  kasy — kasjerka obsługuje Cię 1 min, ale przy kasie stoisz 10. Po co: pod obciążeniem prawie cały
-  wzrost latencji to czekanie, a nie wolniejsza obsługa. Pułapka: czekania nie widać w trace, jeśli
-  nikt go nie zmierzył — wygląda jak „pusta przerwa” albo doliczasz je do obsługi.
-  (→ `00-teoria.md` „Czekanie vs obsługa”)
-- **Semafor (slot)** — licznik pozwoleń: najwyżej N wywołań LLM naraz, reszta czeka na
-  `acquire()`. Po co: chroni dostawcę i nasz budżet przed zalewem. Pułapka: semafor jest kolejką
-  bez okienka — nie raportuje, ile osób czeka ani jak długo, dopóki tego nie dopiszesz.
-- **Span-rodzeństwo vs span-rodzic** — czekanie i wywołanie następują PO SOBIE, więc są
-  rodzeństwem pod spanem żądania. Gdyby `llm.queue_wait` był rodzicem `llm.call`, trace mówiłby
-  „wywołanie było częścią czekania” — fałsz, który psuje każdą późniejszą analizę.
-- **RED** (Rate, Errors, Duration) — trzy pytania o każdą usługę: ile żądań/s, ile błędów, jak długo.
-  W tym kursie: `app_requests_total{endpoint,wynik}` i `app_request_duration_seconds`.
-  (→ `00-teoria.md` „RED i USE dla tej aplikacji”)
+## Theory in a nutshell
+- **Response time = waiting + service.** Service is the work done for the request (here: the LLM
+  call); waiting is standing in a queue before that work (here: for a free semaphore slot). Intuition:
+  a checkout line — the cashier serves you for 1 min, but you stand at the register for 10. Why it
+  matters: under load almost all of the latency growth is waiting, not slower service. Pitfall: you
+  cannot see waiting in a trace if nobody measured it — it looks like an "empty gap", or you add it to
+  the service time.
+  (→ `00-theory.md` "Waiting vs service")
+- **Semaphore (slot)** — a counter of permits: at most N LLM calls at a time, the rest wait on
+  `acquire()`. Why it matters: it protects the provider and our budget from a flood. Pitfall: a
+  semaphore is a queue with no ticket window — it does not report how many people are waiting or for
+  how long until you add that yourself.
+- **Sibling span vs parent span** — waiting and the call happen one AFTER the other, so they are
+  siblings under the request span. If `llm.queue_wait` were the parent of `llm.call`, the trace would
+  say "the call was part of the waiting" — a falsehood that spoils every later analysis.
+- **RED** (Rate, Errors, Duration) — three questions about every service: how many requests/s, how
+  many errors, how long. In this course: `app_requests_total{endpoint,outcome}` and
+  `app_request_duration_seconds`.
+  (→ `00-theory.md` "RED and USE for this application")
 
-## Kroki
-1. **Stos i środowisko** (raz na cały kurs):
+## Steps
+1. **Stack and environment** (once for the whole course):
    ```bash
-   docker compose up -d --wait                       # lgtm, redis, mock-llm (projekt llmperf)
+   docker compose up -d --wait                       # lgtm, redis, mock-llm (project llmperf)
    python -m venv .venv && .venv/bin/pip install -r requirements.txt
    source .venv/bin/activate
-   python scripts/generuj_zgloszenia.py              # data/zgloszenia.jsonl (20 000 zgłoszeń)
+   python scripts/generate_claims.py                 # data/claims.jsonl (20,000 claims)
    ```
-2. **Aplikacja** (terminal T1; zostaw ją uruchomioną):
+2. **The application** (terminal T1; leave it running):
    ```bash
    uvicorn app.main:app --port 8060
    ```
-   T2: `curl -s 127.0.0.1:8060/health` — `"status": "ok"`, zależności `redis` i `llm` (atrapa) OK.
-3. Jedno streszczenie, z nagłówkami:
+   T2: `curl -s 127.0.0.1:8060/health` — `"status": "ok"`, the dependencies `redis` and `llm` (the mock) are OK.
+3. One summary, with headers:
    ```bash
    curl -s -D - -X POST 127.0.0.1:8060/claims/42/summary | grep -iE 'server-timing|^\{'
    ```
-   `Server-Timing` niesie czasy w ms: `czekanie`, `llm`, `total`. Teraz `czekanie` jest bliskie 0.
-4. **Zanim spojrzysz w trace:** ile spanów spodziewasz się w trace jednego streszczenia i w jakiej
-   relacji (kto jest czyim rodzicem)? Gdzie w nim będzie widać czekanie na slot?
+   `Server-Timing` carries the times in ms: `wait`, `llm`, `total`. Right now `wait` is close to 0.
+4. **Before you look at the trace:** how many spans do you expect in the trace of one summary, and how
+   are they related (who is whose parent)? Where in it will the slot wait show up?
 5. Grafana http://127.0.0.1:3060 (admin/admin) → **Explore → Tempo → TraceQL**:
    ```
    {resource.service.name="claims-assistant" && name="POST /claims/{n}/summary"}
    ```
-   Otwórz najnowszy trace. Zobaczysz łańcuch `POST /claims/{n}/summary` → `llm.call` →
-   `anthropic.messages.create` (span natywny SDK) → `POST` (klient HTTP httpx2) + drobne `http send`.
-   Czekania nie ma — przy jednym żądaniu go zresztą nie było.
-6. **Hipoteza:** aplikacja ma 4 sloty LLM, streszczenie trwa ~1 s. Co się stanie z 40 żądaniami naraz?
-   Ile będzie trwało ostatnie? Czy trace to pokaże?
+   Open the newest trace. You will see the chain `POST /claims/{n}/summary` → `llm.call` →
+   `anthropic.messages.create` (the SDK's native span) → `POST` (httpx2 HTTP client) + small `http send`
+   spans. There is no waiting — with a single request there was none anyway.
+6. **Hypothesis:** the application has 4 LLM slots, a summary takes ~1 s. What happens with 40
+   requests at once? How long will the last one take? Will the trace show it?
    ```bash
    for i in $(seq 1 40); do curl -s -o /dev/null -X POST 127.0.0.1:8060/claims/$i/summary & done; wait
    ```
-   W Tempo wybierz trace o największym czasie: span żądania trwa kilka sekund, a `llm.call`
-   zaczyna się dopiero pod koniec. Przed nim — dziura. To czekanie na semafor, niewidoczne.
-7. Otwórz **`app/llm/limiter.py`**, funkcja `slot()`, miejsce `TODO ćw. 01`. Dopisz trzy rzeczy:
-   - span `llm.queue_wait` od chwili `t0_ns` do teraz — utworzony **bez aktywowania** (rodzeństwo
-     `llm.call`, nie jego rodzic) i od razu zamknięty,
-   - atrybut `llm.queue.wait_ms` na spanie żądania (`trace.get_current_span()`),
-   - punkt histogramu `telemetry.H_CZEKANIE` z atrybutem `klasa` (przez `telemetry.zapisz`).
-8. Zrestartuj aplikację (Ctrl+C w T1, ponownie `uvicorn …`) i powtórz pętlę z kroku 6. W Tempo:
+   In Tempo pick the trace with the longest duration: the request span lasts several seconds, and
+   `llm.call` starts only at the very end. Before it — a hole. That is the wait on the semaphore,
+   invisible.
+7. Open **`app/llm/limiter.py`**, function `slot()`, the `TODO ex. 01` spot. Add three things:
+   - a `llm.queue_wait` span from the moment `t0_ns` to now — created **without activating it** (a
+     sibling of `llm.call`, not its parent) and ended right away,
+   - a `llm.queue.wait_ms` attribute on the request span (`trace.get_current_span()`),
+   - a data point in the `telemetry.H_QUEUE_WAIT` histogram with the `request_class` attribute (via
+     `telemetry.record`).
+8. Restart the application (Ctrl+C in T1, then `uvicorn …` again) and repeat the loop from step 6. In
+   Tempo:
    ```
    {name="llm.queue_wait"}
    {span.llm.queue.wait_ms > 100.0}
    ```
-   Drugie zapytanie zwraca żądania, które czekały dłużej niż 100 ms (atrybut jest liczbą zmiennoprzecinkową —
-   TraceQL porównuje typy, więc `> 100` bez `.0` nie zwróci nic) — w trace dziura jest teraz
-   spanem `llm.queue_wait`, a obok niego (nie pod nim) leży `llm.call`. Wyszukiwanie TraceQL widzi świeże
-   ślady z opóźnieniem (zmierzone: ~10 s po pętli 0 wyników, po ~30 s 40) — jeśli pusto, odczekaj i odśwież.
-9. **Explore → Prometheus** (RED + czekanie; metryki wysyłane co 5 s — odczekaj chwilę):
+   The second query returns requests that waited longer than 100 ms (the attribute is a float — TraceQL
+   compares types, so `> 100` without `.0` returns nothing) — in the trace the hole is now a
+   `llm.queue_wait` span, and next to it (not under it) sits `llm.call`. TraceQL search sees fresh
+   traces with a delay (measured: ~10 s after the loop 0 results, after ~30 s 40) — if it is empty,
+   wait and refresh.
+9. **Explore → Prometheus** (RED + waiting; metrics are exported every 5 s — wait a moment):
    ```
-   sum by (endpoint, wynik) (rate(app_requests_total[1m]))
+   sum by (endpoint, outcome) (rate(app_requests_total[1m]))
    histogram_quantile(0.99, sum by (le, endpoint) (rate(app_request_duration_seconds_bucket[1m])))
-   histogram_quantile(0.99, sum by (le, klasa) (rate(llm_queue_wait_seconds_bucket[1m])))
+   histogram_quantile(0.99, sum by (le, request_class) (rate(llm_queue_wait_seconds_bucket[1m])))
    ```
-   Porównaj p99 czasu żądania z p99 czekania: jaka część latencji to kolejka?
+   Compare the p99 of the request time with the p99 of the wait: what share of the latency is the queue?
 10. `python check.py ex01`
 
-## Kryteria „done”
-- [ ] Trace streszczenia zawiera span `llm.queue_wait` jako **rodzeństwo** `llm.call` i atrybut
-      `llm.queue.wait_ms` na spanie żądania.
-- [ ] W Prometheusie jest `llm_queue_wait_seconds_bucket{klasa="krotkie"}`.
-- [ ] Po pętli 40 żądań umiesz powiedzieć, ile z czasu najwolniejszego żądania to czekanie, a ile LLM.
-- [ ] `python check.py ex01` przechodzi.
+## Definition of done
+- [ ] The summary trace contains a `llm.queue_wait` span as a **sibling** of `llm.call` and a
+      `llm.queue.wait_ms` attribute on the request span.
+- [ ] Prometheus has `llm_queue_wait_seconds_bucket{request_class="short"}`.
+- [ ] After the 40-request loop you can say how much of the slowest request's time was waiting and how
+      much was the LLM.
+- [ ] `python check.py ex01` passes.
 
-## Pytania kontrolne
-1. Dlaczego span czekania tworzysz przez `start_span` (bez aktywacji), a nie `start_as_current_span`?
-   Co by pokazał trace w drugim przypadku?
-2. Przy 40 żądaniach i 4 slotach po ~1 s: ile mniej więcej czekało ostatnie żądanie? Z czego to wynika?
-3. Nagłówek `Server-Timing` i trace pokazują ten sam podział. Po co Ci oba (kto czyta który)?
+## Review questions
+1. Why do you create the wait span with `start_span` (without activating it) rather than
+   `start_as_current_span`? What would the trace show in the second case?
+2. With 40 requests and 4 slots of ~1 s each: roughly how long did the last request wait? What does it
+   follow from?
+3. The `Server-Timing` header and the trace show the same breakdown. Why do you need both (who reads
+   which)?
 
-Odpowiedzi: `solutions/pytania_odpowiedzi.md` (zajrzyj PO własnej próbie).
+Answers: `solutions/questions_answers.md` (look AFTER your own attempt).
 
-## ★ Bonus (opcjonalnie)
-Dodaj do spanu `llm.queue_wait` atrybut z liczbą żądań czekających w chwili wejścia do kolejki
-(`st.liczba_czekajacych`). Znajdź TraceQL-em żądania, które zastały kolejkę dłuższą niż 20, i porównaj
-ich czekanie z prawem Little'a (ćw. 3).
+## ★ Bonus (optional)
+Add to the `llm.queue_wait` span an attribute with the number of requests waiting at the moment of
+entering the queue (`st.waiting_count`). Use TraceQL to find requests that found a queue longer than
+20, and compare their wait with Little's law (ex. 3).
 
 ---
-Utknąłeś? Stopniowane podpowiedzi: `solutions/hints/ex01_hint1.md` (kierunek) →
-`hint2` (API OTel) → `hint3` (pseudokod). Gotowe rozwiązanie to OSTATNI szczebel:
+Stuck? Graded hints: `solutions/hints/ex01_hint1.md` (direction) →
+`hint2` (OTel API) → `hint3` (pseudocode). The ready-made solution is the LAST rung:
 `solutions/ex01_limiter.py` → `app/llm/limiter.py`.

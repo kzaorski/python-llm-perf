@@ -1,8 +1,8 @@
-# Ćw. 01 — podpowiedź 1 (kierunek)
+# Ex. 01 — hint 1 (direction)
 
-Czas czekania na slot już jest policzony: w `app/llm/limiter.py`, w `slot()`, zmienna `czekanie` (sekundy)
-i znacznik `t0_ns` (chwila wejścia do kolejki). Brakuje tylko jego **pokazania** w trzech miejscach:
-osobny span w trace, atrybut na spanie żądania i histogram w metrykach.
+The slot wait time is already computed: in `app/llm/limiter.py`, in `slot()`, the variable `wait` (seconds)
+and the marker `t0_ns` (the moment of entering the queue). All that is missing is **showing** it in three
+places: a separate span in the trace, an attribute on the request span, and a histogram in the metrics.
 
-Pytanie pomocnicze: czy span czekania ma być rodzicem spanu `llm.call`, czy jego rodzeństwem? Co by pokazał
-trace, gdyby wywołanie LLM było „wewnątrz” czekania?
+A guiding question: should the wait span be the parent of the `llm.call` span, or its sibling? What would the
+trace show if the LLM call were "inside" the wait?

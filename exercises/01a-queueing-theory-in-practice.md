@@ -1,278 +1,278 @@
-# 01a. Czytanka: teoria kolejek w praktyce
+# 01a. Reading: queueing theory in practice
 
-Czytanka, nie ćwiczenie — bez zadań i kryteriów „done”. Cel: przełożyć
-prawo Little'a i krzywą wykorzystania z `00-teoria.md` na konkretne
-czynności z bloku I: jak zmierzyć pojemność, jak znaleźć kolano na rampie,
-ile slotów zaplanować i co się dzieje, gdy w jednej puli spotykają się
-żądania sekundowe i wielominutowe. Każde pojęcie w schemacie:
+A reading, not an exercise — no tasks and no "done" criteria. The goal is to translate
+Little's law and the utilization curve from `00-theory.md` into concrete
+activities from Block I: how to measure capacity, how to find the knee on a ramp,
+how many slots to plan for, and what happens when requests lasting seconds and requests
+lasting minutes meet in one pool. Every concept follows the same pattern:
 
-> **Definicja** → **Intuicja/analogia** → **Po co to** → **Częsta pomyłka**
+> **Definition** → **Intuition/analogy** → **Why it matters** → **Common mistake**
 
-Wracaj tu, gdy coś przestanie się spinać. Krótkie definicje są w `slownik.md`.
+Come back here whenever things stop adding up. Short definitions are in `glossary.md`.
 
 ---
 
-## Pojemność i wąskie gardło
+## Capacity and the bottleneck
 
-**Definicja.** **Pojemność** stacji to największa przepustowość, jaką może
-utrzymać: **X_max = c / S** (c — liczba serwerów/slotów, S — średni czas
-obsługi). Pojemność całej ścieżki żądania to **minimum** pojemności stacji, przez
-które przechodzi — stacja, która wyznacza to minimum, to **wąskie gardło**.
-Dla ścieżki streszczenia w kursie kandydatów jest kilka:
+**Definition.** The **capacity** of a service center is the highest throughput it can
+sustain: **X_max = c / S** (c — the number of servers/slots, S — the average
+service time). The capacity of the whole request path is the **minimum** of the capacities of the
+service centers it passes through — the service center that sets that minimum is the **bottleneck**.
+For the summary path in this course there are several candidates:
 
-| Stacja | Pojemność | Przykład z kursu |
+| Service center | Capacity | Example from the course |
 |---|---|---|
-| semafor LLM | sloty / S | 4 / 1.06 s ≈ 3.8/s (szkielet), 32 / 1.06 s ≈ 30/s (po ćw. 6) |
-| pula połączeń httpx2 | max_connections / S | 8 / 1.06 s ≈ 7.5/s przy semaforze 64 (wariant ćw. 6) |
-| limit tokenów dostawcy | OTPM / tokeny_wyjścia | 12 000 / 200 = 60/min = 1/s (profil `limity`, ćw. 8) |
-| moc dostawcy | generacje_naraz / S | 8 generacji + kolejka 8, potem 529 (profil `przeciazenie`, ćw. 9, 14) |
-| procesy gunicorna `-k sync` | procesy / S | 29 / 3.5 s ≈ 8.3/s (ćw. 7) |
-| pętla zdarzeń z blokadą | 1 / S | sync klient: 20 wywołań po 0.5 s = 10 s szeregowo (ćw. 4) |
+| LLM semaphore | slots / S | 4 / 1.06 s ≈ 3.8/s (skeleton), 32 / 1.06 s ≈ 30/s (after ex. 6) |
+| httpx2 connection pool | max_connections / S | 8 / 1.06 s ≈ 7.5/s with a semaphore of 64 (ex. 6 variant) |
+| provider token limit | OTPM / output_tokens | 12,000 / 200 = 60/min = 1/s (`limits` profile, ex. 8) |
+| provider capacity | concurrent_generations / S | 8 generations + a queue of 8, then 529 (`overload` profile, ex. 9, 14) |
+| gunicorn `-k sync` processes | processes / S | 29 / 3.5 s ≈ 8.3/s (ex. 7) |
+| event loop with blocking | 1 / S | sync client: 20 calls of 0.5 s = 10 s in series (ex. 4) |
 
-**Intuicja.** Rura złożona z odcinków o różnych średnicach: przepływ wyznacza
-najwęższy odcinek. Poszerzanie pozostałych nie zmienia nic — poza tym, że
-przed najwęższym zbiera się więcej wody.
+**Intuition.** A pipe made of sections with different diameters: the flow is set by the
+narrowest section. Widening the others changes nothing — except that more water
+collects in front of the narrowest one.
 
-**Po co to.** Zanim dołożysz slotów, policz, czy to semafor jest wąskim
-gardłem. W ćw. 8 aplikacja ma 32 sloty (30/s), ale profil `limity`
-przepuszcza 1 streszczenie/s — dokładanie slotów zwiększy tylko liczbę 429.
-W wariancie ćw. 6 semafor 64 przy puli połączeń 8 daje u dostawcy co najwyżej
-8 generacji naraz — wąskim gardłem jest pula, nie semafor.
+**Why it matters.** Before you add slots, work out whether the semaphore is the bottleneck.
+In ex. 8 the application has 32 slots (30/s), but the `limits` profile
+lets through 1 summary/s — adding slots will only increase the number of 429s.
+In the ex. 6 variant a semaphore of 64 with a connection pool of 8 gives the provider at most
+8 concurrent generations — the bottleneck is the pool, not the semaphore.
 
-**Częsta pomyłka.** Liczenie pojemności z **czasu całkowitego** żądania
-zamiast z **czasu obsługi** na danej stacji. Gdy żądanie czeka 30 s na slot i
-1 s się wykonuje, slot jest zajęty 1 s, nie 31 s — do X_max = c / S wstawiasz
-1.06 s. Odwrotnie dla puli wątków anyio: wątek jest zajęty przez cały czas
-synchronicznego wywołania, łącznie z czekaniem na sieć.
+**Common mistake.** Computing capacity from a request's **total time**
+instead of its **service time** at a given service center. When a request waits 30 s for a slot and
+runs for 1 s, the slot is busy for 1 s, not 31 s — you put 1.06 s into X_max = c / S. The reverse
+holds for the anyio thread pool: a thread is busy for the entire duration of the
+synchronous call, including waiting for the network.
 
 ---
 
-## Wyznaczanie pojemności pomiarem: rampa
+## Measuring capacity: the ramp
 
-**Definicja.** **Rampa** to test otwarty, w którym intensywność dopływu
-rośnie schodkami (w k6: executor `ramping-arrival-rate`, w kursie
-`k6/rampa.js` z parametrami `OD`, `DO`, `SKOK`, `KROK_S`). Na każdym schodku
-odczytujesz w oknie równym długości schodka: **osiągnięte tempo**, **zajętość**
-zasobu (`llm_inflight`) i **czekanie** (p90 z histogramu
-`llm_queue_wait_seconds`). Pojemność to tempo, na którym osiągnięta
-przepustowość przestaje nadążać za zadaną.
+**Definition.** A **ramp** is an open-model test in which the arrival rate
+grows in steps (in k6: the `ramping-arrival-rate` executor, in the course
+`k6/ramp.js` with the parameters `FROM`, `TO`, `STEP_RPS`, `STEP_S`). At each step you
+read, in a window equal to the step length: the **achieved rate**, the **occupancy**
+of the resource (`llm_inflight`) and the **wait** (p90 from the
+`llm_queue_wait_seconds` histogram). Capacity is the rate at which the achieved
+throughput stops keeping up with the requested one.
 
-**Intuicja.** Próba wysiłkowa na bieżni: prędkość rośnie co minutę, mierzysz
-tętno. Długo rośnie liniowo, w pewnym momencie wypłaszcza się na maksimum —
-dalej organizm „zaciąga dług” (kwas mlekowy = kolejka), którego nie widać
-od razu w tempie biegu, tylko w tym, jak długo dochodzisz do siebie.
+**Intuition.** A treadmill stress test: the speed goes up every minute, you measure
+your heart rate. For a long time it rises linearly, at some point it flattens out at a maximum;
+beyond that the body "takes on debt" (lactic acid = the queue) that does not show
+up right away in the running pace, only in how long it takes you to recover.
 
-**Po co to.** Rampa po ćw. 6 (32 sloty, streszczenia ~1.06 s; zadane schodki
-4, 12, 20, 28, 36, 44/s, każdy ~22 s) dała w kolejnych oknach 22 s z
-Prometheusa (okna nie są idealnie wyrównane ze schodkami — `rate()` wygładza
-przejścia):
+**Why it matters.** The ramp after ex. 6 (32 slots, summaries ~1.06 s; requested steps
+4, 12, 20, 28, 36, 44/s, each ~22 s) gave, in consecutive 22 s windows from
+Prometheus (the windows are not perfectly aligned with the steps — `rate()` smooths
+the transitions):
 
-| okno | 1 | 2 | 3 | 4 | 5 | 6 |
+| window | 1 | 2 | 3 | 4 | 5 | 6 |
 |---|---|---|---|---|---|---|
-| osiągnięte tempo | 8 | 15 | 20.5 | 29.2 | 29.8 | 30.2/s |
+| achieved rate | 8 | 15 | 20.5 | 29.2 | 29.8 | 30.2/s |
 | `llm_inflight` max | 13 | 24 | 31 | **32** | 32 | 32 |
-| czekanie p90 | 0 | 0 | 0 | 1.6 s | 6.1 s | 9.7 s |
+| wait p90 | 0 | 0 | 0 | 1.6 s | 6.1 s | 9.7 s |
 
-Trzy niezależne sygnały pokazują to samo: tempo staje na ~30/s, zajętość
-przykleja się do 32, czekanie odrywa się od zera. Rachunek Little'a
-(32 / 1.06 ≈ 30.2/s) zgadza się z pomiarem — model jest zweryfikowany i można
-na nim planować.
+Three independent signals show the same thing: the rate stalls at ~30/s, occupancy
+sticks to 32, waiting breaks away from zero. Little's calculation
+(32 / 1.06 ≈ 30.2/s) agrees with the measurement — the model is verified and you can
+plan on it.
 
-**Częsta pomyłka.** Za krótkie schodki i ślepota na generator. Przy schodku
-5 s kolejka nie zdąży urosnąć i kolano „przesunie się” w prawo. Powyżej
-kolana generator też ma swoje limity: w rampie z kursu przy 36–44/s k6
-zgłosił 130 `dropped_iterations` i 45 błędów `dial: i/o timeout` (sieć Docker
-Desktop przy setkach nowych połączeń) — to są problemy **generatora**, nie
-aplikacji, i podaje się je w raporcie osobno.
-
----
-
-## Kolano krzywej: jak je wskazać
-
-**Definicja.** **Kolano** to obszar wykorzystania, w którym czas czekania
-przechodzi z „pomijalnego” w „rosnący szybciej niż obciążenie”. Praktyczna
-definicja dla pomiaru: **najwyższe tempo, przy którym czekanie p90 (albo p99)
-mieści się w budżecie**, np. ≤ 10% czasu obsługi. Teoretycznie (M/M/c) kolano
-wypada tym bliżej ρ = 1, im więcej serwerów i im mniejsza zmienność czasów.
-
-**Intuicja.** Na autostradzie przy 60% zajętości pasów jedziesz swobodnie,
-przy 85% — falami, przy 95% — każde hamowanie jednego auta tworzy korek na
-kilometr. Kolano to ten moment, gdy „fale” zaczynają się same z siebie.
-
-**Po co to.** Dla 32 slotów rachunek Erlanga C (00-teoria) daje czekanie
-średnio 0.03 s przy ρ = 0.8 (24/s), 0.15 s przy ρ = 0.9 (27/s), 3.1 s przy
-ρ = 0.99 (30/s). Pomiar w rampie: czekanie p90 = 0 do ~20/s, 1.6 s przy
-29.2/s. Kolano leży więc w okolicy **28–30/s** — ok. 90–97% pojemności
-(30.2/s): przy wielu slotach i małej zmienności czasów obsługi jest blisko 100%.
-Dla 4 slotów (szkielet) to samo ρ daje wielokrotnie dłuższe czekanie: mało
-serwerów = łagodne, wczesne kolano.
-
-**Częsta pomyłka.** Szukanie kolana na **średniej** latencji. Średnia rośnie
-późno i łagodnie (dominuje ją masa żądań bez czekania); ogon (p90/p99
-czekania) odrywa się wcześniej i wyraźniej. Druga pomyłka: kolano z wykresu
-latencji całkowitej, gdy czas obsługi sam zmienia się z obciążeniem (np.
-dostawca zwalnia pod ruchem) — wtedy rozdziel czekanie i obsługę.
+**Common mistake.** Steps that are too short, and blindness to the generator. With a 5 s step
+the queue has no time to grow and the knee "shifts" to the right. Above
+the knee the generator has its limits too: in the course's ramp at 36–44/s k6
+reported 130 `dropped_iterations` and 45 `dial: i/o timeout` errors (the Docker
+Desktop network under hundreds of new connections) — those are problems of the **generator**, not
+of the application, and you report them separately.
 
 ---
 
-## Planowanie pojemności z marginesem
+## The knee of the curve: how to find it
 
-**Definicja.** **Planowanie pojemności** to dobór liczby serwerów (slotów,
-procesów, workerów) tak, żeby przy przewidywanym ruchu wykorzystanie
-pozostało poniżej docelowego **ρ_cel** (zwykle 0.7–0.8):
+**Definition.** The **knee** is the range of utilization in which the waiting time
+goes from "negligible" to "growing faster than the load". A practical
+definition for measurement: **the highest rate at which the wait p90 (or p99)
+stays within budget**, e.g. ≤ 10% of the service time. Theoretically (M/M/c) the knee
+falls closer to ρ = 1 the more servers there are and the lower the variability of the times.
 
-> **c = ⌈ λ_szczyt · S / ρ_cel ⌉**
+**Intuition.** On a highway at 60% lane occupancy you drive freely,
+at 85% — in waves, at 95% — every braking of a single car creates a jam
+a mile long. The knee is the moment when the "waves" start by themselves.
 
-plus sprawdzenie, czy **każda** stacja na ścieżce (pula połączeń, limit
-dostawcy, moc dostawcy) wytrzyma ten sam ruch.
+**Why it matters.** For 32 slots the Erlang C calculation (00-theory) gives an average wait of
+0.03 s at ρ = 0.8 (24/s), 0.15 s at ρ = 0.9 (27/s), 3.1 s at
+ρ = 0.99 (30/s). The measurement on the ramp: wait p90 = 0 up to ~20/s, 1.6 s at
+29.2/s. So the knee lies around **28–30/s** — about 90–97% of capacity
+(30.2/s): with many slots and low variability of service times it is close to 100%.
+For 4 slots (the skeleton) the same ρ gives a many times longer wait: few
+servers = a gentle, early knee.
 
-**Intuicja.** Restauracja nie zatrudnia kelnerów na średni ruch z całego dnia,
-tylko na sobotni wieczór — i trochę więcej, bo ktoś zachoruje.
-
-**Po co to.** Przykład dla streszczeń: szczyt 20/s × 1.06 s = 21.2 slotu
-średnio. Przy ρ_cel = 0.8: ⌈21.2 / 0.8⌉ = **27** slotów; przy 0.7 — **31**.
-Wybór 32 slotów w kursie to ρ ≈ 0.66 przy 20/s. Margines pokrywa:
-- **zmienność** — przybycia nie są równe, czasy obsługi mają ogon;
-- **szczyty krótsze niż okno metryki** — „średnio 20/s” w minucie to może być
-  40/s przez 10 s;
-- **ponowienia** — każda próba to dodatkowe λ (ćw. 9: bez kontroli 3.65 próby
-  na żądanie);
-- **utratę instancji** — gdy jeden z dwóch procesów padnie, drugi dostaje
-  podwójny ruch.
-
-Druga połowa planu to **górne ograniczenia, których nie zmienisz slotami**:
-limit dostawcy (OTPM 12 000 → 1 streszczenie/s w profilu `limity`), moc
-dostawcy (8 generacji naraz w profilu `przeciazenie`). Sloty powyżej tego
-sufitu nie zwiększą przepustowości — zwiększą 429/529.
-
-**Częsta pomyłka.** „Dajmy 1000 slotów, będzie zapas”. Slot bez pokrycia w
-pojemności następnej stacji przenosi kolejkę dalej, tam, gdzie gorzej ją
-widać i gdzie płacisz błędami: u dostawcy (529, ćw. 14: 2 × 100
-równoległych zadań na moc 8 → 179/200 błędów w 6 s). Limit współbieżności
-**jest** narzędziem — ma odpowiadać pojemności tego, co jest za nim.
+**Common mistake.** Looking for the knee in **average** latency. The average grows
+late and gently (it is dominated by the mass of requests with no waiting); the tail (wait p90/p99)
+breaks away earlier and more clearly. The second mistake: taking the knee from the total latency chart
+when the service time itself changes with load (e.g. the provider slows down under traffic) —
+then separate waiting from service.
 
 ---
 
-## Planowanie dla wywołań wielominutowych
+## Capacity planning with headroom
 
-**Definicja.** Ten sam wzór, ale S w minutach. Dla analiz (średnio ~153 s)
-przy dopływie 0.4/s potrzeba średnio L = 0.4 × 153 ≈ 61 slotów, a z ρ_cel =
-0.8 — **77**. To liczba trwających naraz wywołań u dostawcy, każde przez
-minuty.
+**Definition.** **Capacity planning** is choosing the number of servers (slots,
+processes, workers) so that at the expected traffic utilization
+stays below the target **ρ_target** (usually 0.7–0.8):
 
-**Intuicja.** Parking: samochód na 5 minut i samochód na 5 godzin zajmują
-tyle samo miejsca, ale ten drugi „konsumuje” go sześćdziesiąt razy więcej.
+> **c = ⌈ λ_peak · S / ρ_target ⌉**
 
-**Po co to.** Taki wynik zwykle oznacza, że synchroniczne trzymanie żądania
-HTTP przez minuty jest złym modelem. Masz trzy opcje, wszystkie w kursie:
-1. **Osobna pula dla długich** o rozmiarze zgodnym z mocą przeznaczoną dla
-   nich (16 slotów → 0.105/s) i **jawne odrzucanie** nadmiaru (ćw. 12: 42
-   szybkie 503 zamiast 30 porzuceń po minutach).
-2. **Kolejka zadań** — klient dostaje identyfikator zadania od razu, worker
-   przetwarza w swoim tempie, zaległość i jej wiek są widoczne (ćw. 14).
-3. **Deadline per klasa** — krótkie 30 s, długie 330 s; żądanie, które i tak
-   nie zdąży, nie zajmuje slotu (ćw. 10).
+plus a check that **every** service center on the path (connection pool, provider
+limit, provider capacity) can handle the same traffic.
 
-**Częsta pomyłka.** Wspólny deadline dla wszystkich klas. W teście z budowy
-kursu deadline 150 s „ratował” medianę krótkich, ale zabił **wszystkie** 7
-długich strumieni (120–300 s) — praca zmarnowana, slot u dostawcy zajęty na
-nic.
+**Intuition.** A restaurant does not staff waiters for the average traffic of the whole day,
+but for Saturday evening — and a few more, because someone will call in sick.
 
----
+**Why it matters.** An example for summaries: a peak of 20/s × 1.06 s = 21.2 slots
+on average. With ρ_target = 0.8: ⌈21.2 / 0.8⌉ = **27** slots; with 0.7 — **31**.
+Choosing 32 slots in the course means ρ ≈ 0.66 at 20/s. The headroom covers:
+- **variability** — arrivals are not even, service times have a tail;
+- **peaks shorter than the metric window** — "an average of 20/s" over a minute may be
+  40/s for 10 s;
+- **retries** — every attempt is additional λ (ex. 9: uncontrolled, 3.65 attempts
+  per request);
+- **losing an instance** — when one of two processes dies, the other gets
+  double the traffic.
 
-## Ruch mieszany i head-of-line blocking
+The second half of the plan is the **upper bounds that you cannot change with slots**:
+the provider limit (OTPM 12,000 → 1 summary/s in the `limits` profile), the provider
+capacity (8 concurrent generations in the `overload` profile). Slots above that
+ceiling will not increase throughput — they will increase 429s/529s.
 
-**Definicja.** **Head-of-line blocking** (blokowanie czoła kolejki) to sytuacja,
-w której krótkie żądania czekają za długimi, bo dzielą tę samą kolejkę i te
-same serwery. W puli c slotów wystarczy c długich żądań, żeby na czas ich
-trwania pojemność dla krótkich spadła do zera. Wariancja czasów obsługi
-dramatycznie wydłuża kolejkę przy tym samym średnim obciążeniu.
-
-**Intuicja.** Jedna kolejka na poczcie: przed Tobą trzy osoby wysyłają po 40
-paczek zagranicznych, Ty chcesz tylko kupić znaczek. Okienko „tylko listy”
-(osobna pula) rozwiązuje problem bez dokładania pracowników.
-
-**Po co to.** Dwa pomiary z kursu:
-- **Semafor 8, ruch mieszany** (0.5/s przez 180 s: 75 krótkich ~2 s, 10 z
-  długim TTFT 60–180 s, 7 z długim strumieniem 120–300 s): krótkie czekały
-  **p50 85 s**, p99 113 s; opróżnienie trwało 240 s po końcu dopływu.
-- **Wspólna pula 32** (ćw. 12: krótkie 4/s + długie 0.4/s, 180 s): krótkie
-  czekanie **p50 29 s / p99 131 s**, w t = 180 s czeka 287 krótkich, drain
-  342 s. **Osobne pule 32 / 16**: czekanie krótkich p99 = 0, całość p99 1.74 s.
-  Długie wciąż się nie mieszczą — ale to już problem ich własnej pojemności, a
-  nie krótkich.
-
-Naprawy, od najprostszej: **osobne pule (bulkhead) per klasa**, **osobne
-budżety czekania i deadline'y**, **przeniesienie długich do kolejki zadań**.
-Priorytety we wspólnej kolejce pomagają mniej, niż się wydaje: gdy wszystkie
-sloty zajęły długie, priorytet nie zwolni żadnego.
-
-**Częsta pomyłka.** Diagnoza „krótkie są wolne, więc dostawca zwolnił”. Czas
-obsługi krótkich (`llm_call_duration_seconds{klasa="krotkie"}`) jest w
-porządku — rośnie tylko czekanie. Patrz na `llm_queue_wait_seconds` per
-klasa i na `llm_inflight{klasa="dlugie"}`.
+**Common mistake.** "Let's give it 1,000 slots, that will be headroom." A slot with no backing in
+the capacity of the next service center moves the queue further on, to where it is harder to see
+and where you pay in errors: at the provider (529, ex. 14: 2 × 100
+concurrent tasks against a capacity of 8 → 179/200 errors in 6 s). A concurrency limit
+**is** a tool — it should match the capacity of what stands behind it.
 
 ---
 
-## Stan ustalony, rozgrzewka i opróżnianie
+## Planning for multi-minute calls
 
-**Definicja.** **Stan ustalony** — okres, w którym średnie (tempo, zajętość,
-czekanie) przestały się zmieniać. Pomiar pojemności ma sens tylko w nim. Przed
-nim jest **rozgrzewka** (pule się zapełniają, połączenia się nawiązują), po
-końcu dopływu — **opróżnianie**. Przy λ > X_max stanu ustalonego **nie ma**.
+**Definition.** The same formula, but with S in minutes. For analyses (on average ~153 s)
+at an arrival rate of 0.4/s you need on average L = 0.4 × 153 ≈ 61 slots, and with ρ_target =
+0.8 — **77**. That is the number of calls in flight at the same time at the provider, each for
+minutes.
 
-**Intuicja.** Nie mierzysz zużycia paliwa w pierwszych 30 sekundach po
-odpaleniu zimnego silnika ani na zjeździe z autostrady.
+**Intuition.** A parking lot: a car staying 5 minutes and a car staying 5 hours take up
+the same amount of space, but the second one "consumes" sixty times more of it.
 
-**Po co to.** Z Little'a: stan ustalony przychodzi po czasie rzędu kilku W.
-Dla streszczeń (W ~1 s) wystarczy kilka sekund; dla analiz (W ~150 s) —
-**kilka minut**. Dlatego testy z długimi wywołaniami trwają w kursie ≥ 180 s
-dopływu plus opróżnianie (razem 6.5–10 minut), a raport zawiera stan po końcu
-dopływu: ilu czeka, wiek najstarszego, czas drain.
+**Why it matters.** Such a result usually means that holding an HTTP request
+synchronously for minutes is the wrong model. You have three options, all in the course:
+1. **A separate pool for long requests**, sized to the capacity set aside for
+   them (16 slots → 0.105/s) and **explicit rejection** of the excess (ex. 12: 42
+   fast 503s instead of 30 abandonments after minutes).
+2. **A task queue** — the client gets a task identifier immediately, a worker
+   processes at its own pace, the backlog and its age are visible (ex. 14).
+3. **A deadline per class** — short 30 s, long 330 s; a request that will not
+   make it anyway does not occupy a slot (ex. 10).
 
-**Częsta pomyłka.** 60-sekundowy test z żądaniami trwającymi 150 s. Żadne
-długie żądanie nie zdąży się skończyć w czasie dopływu, wszystkie wyniki
-pochodzą z „ogona” po teście — a domyślny timeout k6 (60 s) i tak by je zerwał.
-
----
-
-## Little jako test spójności pomiaru
-
-**Definicja.** Mając dwa z trzech pomiarów (L, λ, W), liczysz trzeci i
-porównujesz z jego niezależnym pomiarem. Rozbieżność = któryś pomiar jest zły
-albo istnieje kolejka, której nie mierzysz.
-
-**Intuicja.** Księgowość: przychody, rozchody i stan konta muszą się zgadzać.
-Jeśli nie — gdzieś jest nieujęta faktura.
-
-**Po co to.** Przykłady z kursu:
-- kolejka zadań (ćw. 14): 2 procesy × 4 zadania = L = 8, 200 zadań w 28.7 s →
-  X = 6.97/s → W = 8 / 6.97 ≈ 1.15 s na zadanie — zgodne z czasem streszczenia;
-- gunicorn (ćw. 7): UvicornWorker 450 żądań, ostatnie po 34.6 s → osiągnięte
-  450 / 34.6 = 13.0/s, choć zadane było 15/s — reszta to czekanie i ogon;
-- wariant ćw. 6 z pulą połączeń 8: semafor przepuszcza 64, a u dostawcy
-  `mock_llm_generating` ≤ 8 — Little dla dostawcy mówi, że ktoś trzyma resztę
-  w kolejce przed nim; tą kolejką jest pula httpx2.
-
-**Częsta pomyłka.** Porównanie średnich z różnych okien czasowych (λ z
-minuty, W z całego testu). Okna muszą być te same.
+**Common mistake.** A shared deadline for all classes. In a test from building
+the course a 150 s deadline "saved" the median of the short requests, but killed **all** 7
+long streams (120–300 s) — wasted work, a provider slot occupied
+for nothing.
 
 ---
 
-## Jak to się łączy (mapa)
+## Mixed traffic and head-of-line blocking
+
+**Definition.** **Head-of-line blocking** is a situation
+in which short requests wait behind long ones because they share the same queue and the same
+servers. In a pool of c slots, c long requests are enough to drive the capacity for short ones
+to zero for as long as they last. The variance of service times
+dramatically lengthens the queue at the same average load.
+
+**Intuition.** One line at the post office: in front of you three people are each sending 40
+international parcels, and you only want to buy a stamp. A "letters only" window
+(a separate pool) solves the problem without hiring more staff.
+
+**Why it matters.** Two measurements from the course:
+- **A semaphore of 8, mixed traffic** (0.5/s for 180 s: 75 short ~2 s, 10 with a long
+  TTFT of 60–180 s, 7 with a long stream of 120–300 s): the short requests waited
+  **p50 85 s**, p99 113 s; draining took 240 s after the end of the inflow.
+- **A shared pool of 32** (ex. 12: short 4/s + long 0.4/s, 180 s): short requests'
+  wait **p50 29 s / p99 131 s**, at t = 180 s 287 short requests are waiting, drain
+  342 s. **Separate pools 32 / 16**: short requests' wait p99 = 0, overall p99 1.74 s.
+  The long ones still do not fit — but that is a problem of their own capacity, not
+  of the short ones.
+
+Fixes, from the simplest: **separate pools (bulkheads) per class**, **separate
+wait budgets and deadlines**, **moving the long requests to a task queue**.
+Priorities in a shared queue help less than you would think: once the long requests have taken
+all the slots, priority will not free a single one.
+
+**Common mistake.** The diagnosis "the short requests are slow, so the provider slowed
+down". The short requests' service time (`llm_call_duration_seconds{request_class="short"}`) is
+fine — only the wait grows. Look at `llm_queue_wait_seconds` per
+class and at `llm_inflight{request_class="long"}`.
+
+---
+
+## Steady state, warm-up and draining
+
+**Definition.** **Steady state** — the period in which the averages (rate, occupancy,
+wait) have stopped changing. A capacity measurement makes sense only in it. Before
+it comes the **warm-up** (pools fill up, connections get established), after
+the end of the inflow — **draining**. When λ > X_max there is **no** steady state.
+
+**Intuition.** You do not measure fuel consumption in the first 30 seconds after
+starting a cold engine, or on a highway exit ramp.
+
+**Why it matters.** From Little's law: steady state arrives after a time on the order of a few W.
+For summaries (W ~1 s) a few seconds are enough; for analyses (W ~150 s) —
+**a few minutes**. That is why the tests with long calls in the course last ≥ 180 s
+of inflow plus draining (6.5–10 minutes in total), and the report includes the state after the end of
+the inflow: how many are waiting, the age of the oldest, the drain time.
+
+**Common mistake.** A 60-second test with requests lasting 150 s. No
+long request will finish during the inflow, all results
+come from the "tail" after the test — and the default k6 timeout (60 s) would cut them off anyway.
+
+---
+
+## Little's law as a measurement consistency check
+
+**Definition.** Given two of the three measurements (L, λ, W), you compute the third and
+compare it with its independent measurement. A discrepancy = one of the measurements is wrong
+or there is a queue you are not measuring.
+
+**Intuition.** Bookkeeping: income, expenses and the account balance must agree.
+If they do not — there is an unrecorded invoice somewhere.
+
+**Why it matters.** Examples from the course:
+- the task queue (ex. 14): 2 processes × 4 tasks = L = 8, 200 tasks in 28.7 s →
+  X = 6.97/s → W = 8 / 6.97 ≈ 1.15 s per task — consistent with the summary time;
+- gunicorn (ex. 7): UvicornWorker 450 requests, the last after 34.6 s → achieved
+  450 / 34.6 = 13.0/s, although 15/s was requested — the rest is waiting and the tail;
+- the ex. 6 variant with a connection pool of 8: the semaphore lets 64 through, and at the provider
+  `mock_llm_generating` ≤ 8 — Little's law for the provider says that someone is holding the rest
+  in a queue in front of it; that queue is the httpx2 pool.
+
+**Common mistake.** Comparing averages from different time windows (λ from a
+minute, W from the whole test). The windows must be the same.
+
+---
+
+## How it all fits together (map)
 
 ```
- pojemność stacji:  X_max = c / S          ścieżka: min(stacji) = wąskie gardło
-        │                                    (semafor | pula połączeń | OTPM | moc dostawcy | procesy)
+ service center capacity:  X_max = c / S      path: min(service centers) = bottleneck
+        │                                    (semaphore | connection pool | OTPM | provider capacity | processes)
         ▼
- rampa (ćw. 3): tempo staje + inflight = c + czekanie p90 odrywa się  →  kolano ≈ 90–97% X_max (c = 32)
+ ramp (ex. 3): rate stalls + inflight = c + wait p90 breaks away  →  knee ≈ 90–97% of X_max (c = 32)
         │
         ▼
- plan: c = ⌈λ·S / ρ_cel⌉, ρ_cel 0.7–0.8  +  sprawdź sufity, których slotami nie podniesiesz
+ plan: c = ⌈λ·S / ρ_target⌉, ρ_target 0.7–0.8  +  check the ceilings that slots cannot raise
         │
-        ├─ S w minutach → L w dziesiątkach → osobna pula + odrzucanie (ćw. 12) / kolejka zadań (ćw. 14)
-        └─ ruch mieszany → head-of-line → osobne pule per klasa, deadline per klasa (ćw. 10, 12)
- kontrola: L = λ·W na każdej stacji; rozjazd = niemierzona kolejka
+        ├─ S in minutes → L in the tens → separate pool + rejection (ex. 12) / task queue (ex. 14)
+        └─ mixed traffic → head-of-line → separate pools per class, deadline per class (ex. 10, 12)
+ check: L = λ·W at every service center; a mismatch = an unmeasured queue
 ```
 
-Teraz przejdź do ćw. 1.
+Now move on to ex. 1.

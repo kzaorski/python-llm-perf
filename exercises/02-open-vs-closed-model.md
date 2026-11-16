@@ -1,89 +1,93 @@
-# Ćwiczenie 2: k6 — model otwarty vs zamknięty (coordinated omission)
+# Exercise 2: k6 — open vs closed model (coordinated omission)
 
-> Czas: ~40 min (dwa przebiegi k6 po 60 s + analiza)
+> Time: ~40 min (two k6 runs of 60 s each + analysis)
 
-> Blok I. Teoria: `00-teoria.md` „Model otwarty vs zamknięty i coordinated omission”, „Percentyle i ogon”;
-> czytanka `01a-teoria-kolejek-w-praktyce.md`.
+> Block I. Theory: `00-theory.md` "Open vs closed model and coordinated omission", "Percentiles and the tail";
+> block reading `01a-queueing-theory-in-practice.md`.
 
-## Cel
-Puszczasz ten sam ruch dwoma generatorami: zamkniętym (stała liczba wirtualnych użytkowników,
-każdy czeka na odpowiedź) i otwartym (żądania w stałym tempie, niezależnie od odpowiedzi).
-Zobaczysz, że raport modelu zamkniętego jest „ładny”, bo generator sam zwalnia, gdy system zwalnia —
-i nie widzi kolejki. Uzupełniasz scenariusz otwarty w `k6/otwarty.js`.
+## Goal
+You send the same traffic with two load generators: a closed one (a fixed number of virtual users,
+each waiting for its response) and an open one (requests at a constant rate, regardless of the
+responses). You will see that the closed model's report looks "pretty" because the generator itself
+slows down when the system slows down — and it does not see the queue. You complete the open scenario
+in `k6/open_model.js`.
 
-## Teoria w pigułce
-- **Model zamknięty** (`constant-vus`) — N użytkowników w pętli „wyślij → czekaj → (pauza) → wyślij”.
-  Tempo NIE jest parametrem: wynosi N / (czas odpowiedzi + pauza). Gdy system zwalnia, generator
-  wysyła mniej. Po co: modeluje stałą pulę klientów (np. N workerów batchowych). Pułapka: „4 VU” to nie
-  „4 żądania/s”.
-- **Model otwarty** (`constant-arrival-rate`, `ramping-arrival-rate`) — żądania przychodzą w zadanym
-  tempie λ, tak jak klienci z internetu, którzy nie wiedzą o Twojej kolejce. Po co: tylko ten model
-  pokazuje kolejkę i prawdziwy ogon. Pułapka: k6 potrzebuje wystarczającej puli VU — gdy jej zabraknie,
-  sam „zamyka” model i gubi iteracje (`dropped_iterations` > 0).
-- **Coordinated omission** — generator, który czeka na odpowiedź, „umawia się” z systemem: w chwilach
-  przestoju nie wysyła żądań, więc nie mierzy ich (nieistniejącego) czekania. Raport zaniża ogon
-  dokładnie tam, gdzie boli najbardziej. (→ `00-teoria.md`; `slownik.md`)
-- **Osiągnięte tempo** — zawsze podawaj obok percentyli, ile żądań/s naprawdę wysłano. Porównanie
-  p99 dwóch testów ma sens tylko przy tej samej intensywności.
+## Theory in a nutshell
+- **Closed model** (`constant-vus`) — N users in a loop "send → wait → (pause) → send". The rate is NOT
+  a parameter: it equals N / (response time + pause). When the system slows down, the generator sends
+  less. Why it matters: it models a fixed pool of clients (e.g. N batch workers). Pitfall: "4 VUs" is
+  not "4 requests/s".
+- **Open model** (`constant-arrival-rate`, `ramping-arrival-rate`) — requests arrive at a given rate λ,
+  like customers from the internet who know nothing about your queue. Why it matters: only this model
+  shows the queue and the real tail. Pitfall: k6 needs a sufficient VU pool — when it runs out, it
+  "closes" the model by itself and drops iterations (`dropped_iterations` > 0).
+- **Coordinated omission** — a generator that waits for the response "conspires" with the system:
+  during a stall it sends no requests, so it does not measure their (nonexistent) waiting. The report
+  understates the tail exactly where it hurts most. (→ `00-theory.md`; `glossary.md`)
+- **Achieved rate** — always report next to the percentiles how many requests/s were actually sent.
+  Comparing the p99 of two tests makes sense only at the same intensity.
 
-## Kroki
-1. Stan po ćw. 1: aplikacja na 8060 (`uvicorn app.main:app --port 8060`), 4 sloty LLM.
-   Streszczenie trwa ~1 s, więc pojemność ≈ 4 / 1.05 s ≈ 3.8 żądania/s.
-2. **Model zamknięty**, 4 VU bez pauzy, 60 s (terminal T2):
+## Steps
+1. State after ex. 1: the application on 8060 (`uvicorn app.main:app --port 8060`), 4 LLM slots. A
+   summary takes ~1 s, so the capacity ≈ 4 / 1.05 s ≈ 3.8 requests/s.
+2. **Closed model**, 4 VUs with no pause, 60 s (terminal T2):
    ```bash
-   docker compose run --rm k6 run -o experimental-prometheus-rw /scripts/zamkniety.js -e VUS=4 -e PAUZA_S=0 -e CZAS=60s
+   docker compose run --rm k6 run -o experimental-prometheus-rw /scripts/closed_model.js -e VUS=4 -e PAUSE_S=0 -e DURATION=60s
    ```
-   Podsumowanie trafia też do `wyniki/ex02-zamkniety.json`. Zanotuj: `http_reqs` (tempo/s),
-   `http_req_duration` p99, `app_czekanie_krotkie` p99.
-3. **Zanim uruchomisz model otwarty:** ten sam system, nominalnie ta sama intensywność (4 żądania/s).
-   Czy p99 będzie podobne? Co pokaże `app_czekanie_krotkie`?
-4. Otwórz **`k6/otwarty.js`** i uzupełnij `options.scenarios` (TODO ćw. 02): executor modelu otwartego
-   o stałym tempie `RATE` żądań/s przez `CZAS`, z pulą VU dobraną tak, by `dropped_iterations` było 0.
-5. **Model otwarty**, 4/s, 60 s:
+   The summary also goes to `results/ex02-closed.json`. Note down: `http_reqs` (rate/s),
+   `http_req_duration` p99, `app_wait_short` p99.
+3. **Before you run the open model:** the same system, nominally the same intensity (4 requests/s).
+   Will the p99 be similar? What will `app_wait_short` show?
+4. Open **`k6/open_model.js`** and complete `options.scenarios` (TODO ex. 02): an open-model executor
+   with a constant rate `RATE` requests/s for `DURATION`, with a VU pool chosen so that
+   `dropped_iterations` is 0.
+5. **Open model**, 4/s, 60 s:
    ```bash
-   docker compose run --rm k6 run -o experimental-prometheus-rw /scripts/otwarty.js -e RATE=4 -e CZAS=60s
+   docker compose run --rm k6 run -o experimental-prometheus-rw /scripts/open_model.js -e RATE=4 -e DURATION=60s
    ```
-   U mnie (stan po ćw. 1):
+   In my run (state after ex. 1):
 
-   | Model | Osiągnięte tempo | p50 / p99 | czekanie p99 | dropped |
+   | Model | Achieved rate | p50 / p99 | wait p99 | dropped |
    |---|---|---|---|---|
-   | zamknięty, 4 VU bez pauzy | 3.75/s | 1.04 / **1.57 s** | 0 | 0 |
-   | otwarty, 4/s | 3.52/s (dopływ 4/s > pojemność ~3.8/s) | 2.99 / **4.41 s** | 3.28 s | 0 |
+   | closed, 4 VUs with no pause | 3.75/s | 1.04 / **1.57 s** | 0 | 0 |
+   | open, 4/s | 3.52/s (arrival rate 4/s > capacity ~3.8/s) | 2.99 / **4.41 s** | 3.28 s | 0 |
 
-   Zamknięty nie widzi kolejki (czekanie 0 — każdy VU czeka na swoją odpowiedź, więc nigdy nie ma
-   więcej niż 4 żądań naraz). Otwarty przy tej samej nominalnej intensywności pokazuje kolejkę na semaforze.
-6. Pułapka „VU = żądania/s”: powtórz model zamknięty z pauzą 1 s:
+   The closed model does not see the queue (wait 0 — each VU waits for its own response, so there are
+   never more than 4 requests at once). The open model, at the same nominal intensity, shows the queue
+   on the semaphore.
+6. The pitfall "VU = requests/s": repeat the closed model with a 1 s pause:
    ```bash
-   docker compose run --rm k6 run -o experimental-prometheus-rw /scripts/zamkniety.js -e VUS=4 -e PAUZA_S=1 -e CZAS=40s
+   docker compose run --rm k6 run -o experimental-prometheus-rw /scripts/closed_model.js -e VUS=4 -e PAUSE_S=1 -e DURATION=40s
    ```
-   U mnie tempo spadło do **1.92/s** — model sam zwolnił do połowy, a raport nadal wygląda „zdrowo”
-   (p99 1.63 s). Ten przebieg nadpisał `wyniki/ex02-zamkniety.json` — do checka wystarczy dowolny
-   z dwóch przebiegów zamkniętych.
-7. Prometheus (k6 wysyła metryki przez remote write, tag `model`):
+   In my run the rate dropped to **1.92/s** — the model slowed itself down to half, and the report still
+   looks "healthy" (p99 1.63 s). This run overwrote `results/ex02-closed.json` — for the check either of
+   the two closed runs is enough.
+7. Prometheus (k6 sends metrics through remote write, tag `model`):
    ```
    max by (model) (k6_http_req_duration_p99)
-   max by (model) (k6_app_czekanie_krotkie_p99)
+   max by (model) (k6_app_wait_short_p99)
    sum by (model) (k6_dropped_iterations_total)
    ```
 8. `python check.py ex02`
 
-## Kryteria „done”
-- [ ] `k6/otwarty.js` ma scenariusz `constant-arrival-rate`; przebieg 4/s ma `dropped_iterations` = 0.
-- [ ] Umiesz wskazać w wynikach, dlaczego p99 zamkniętego jest niższe, choć system jest ten sam.
-- [ ] Przy każdym porównaniu podajesz osiągnięte tempo, nie liczbę VU.
-- [ ] `python check.py ex02` przechodzi (p99 otwartego > 1.3 × zamkniętego, 0 zgubionych iteracji).
+## Definition of done
+- [ ] `k6/open_model.js` has a `constant-arrival-rate` scenario; the 4/s run has `dropped_iterations` = 0.
+- [ ] You can point out in the results why the closed model's p99 is lower even though the system is the same.
+- [ ] In every comparison you report the achieved rate, not the number of VUs.
+- [ ] `python check.py ex02` passes (open p99 > 1.3 × closed, 0 dropped iterations).
 
-## Pytania kontrolne
-1. Dlaczego w modelu zamkniętym z 4 VU czekanie na semafor wynosi 0, skoro aplikacja ma 4 sloty?
-2. Co oznacza `dropped_iterations` > 0 w modelu otwartym i dlaczego unieważnia wynik?
-3. Kiedy model zamknięty JEST właściwy? Podaj przykład z tej aplikacji.
+## Review questions
+1. Why, in the closed model with 4 VUs, is the semaphore wait 0 when the application has 4 slots?
+2. What does `dropped_iterations` > 0 mean in the open model, and why does it invalidate the result?
+3. When IS the closed model the right one? Give an example from this application.
 
-Odpowiedzi: `solutions/pytania_odpowiedzi.md`.
+Answers: `solutions/questions_answers.md`.
 
-## ★ Bonus (opcjonalnie)
-Ustaw w `k6/otwarty.js` celowo za mało VU (`preAllocatedVUs: 2, maxVUs: 4`) i puść 4/s. Ile iteracji
-zgubił k6 i jak zmienił się p99? To ten sam błąd co model zamknięty, tylko ukryty w konfiguracji.
+## ★ Bonus (optional)
+In `k6/open_model.js` deliberately set too few VUs (`preAllocatedVUs: 2, maxVUs: 4`) and run 4/s. How
+many iterations did k6 drop and how did the p99 change? It is the same mistake as the closed model,
+only hidden in the configuration.
 
 ---
-Utknąłeś? `solutions/hints/ex02_hint1.md` → `hint2` → `hint3`. Gotowe rozwiązanie:
-`solutions/ex02_otwarty.js` → `k6/otwarty.js`.
+Stuck? `solutions/hints/ex02_hint1.md` → `hint2` → `hint3`. The ready-made solution:
+`solutions/ex02_open_model.js` → `k6/open_model.js`.
