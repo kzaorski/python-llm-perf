@@ -1,236 +1,243 @@
-# 00. Teoria: aplikacja LLM pod obciążeniem — czekanie, kolejki, pojemność
+# 00. Theory: an LLM application under load — waiting, queues, capacity
 
-Duży primer, nie ćwiczenie — bez zadań i kryteriów „done”. Cel: zbudować mapę
-pojęć, zanim wejdziesz w ćwiczenia 1–18. Każde pojęcie w schemacie:
+A big primer, not an exercise — no tasks and no "done" criteria. The goal is to
+build a map of concepts before you start exercises 1–18. Every concept follows the
+same pattern:
 
-> **Definicja** → **Intuicja/analogia** → **Po co to** → **Częsta pomyłka**
+> **Definition** → **Intuition/analogy** → **Why it matters** → **Common mistake**
 
-Wracaj tu, gdy coś przestanie się spinać. Krótkie definicje wszystkich terminów
-są w `slownik.md`. Przed blokami tematycznymi czekają węższe czytanki:
-`01a-teoria-kolejek-w-praktyce.md`, `04a-asyncio-petla-i-pule.md`,
-`08a-limity-retry-timeouty.md`, `12a-backpressure-i-streaming.md`,
-`14a-kolejki-zadan-cache-batching.md`. Ten dokument daje wspólny fundament pod
-wszystkie pięć.
+Come back here whenever things stop adding up. Short definitions of all terms are
+in `glossary.md`. Narrower readings wait before the topic blocks:
+`01a-queueing-theory-in-practice.md`, `04a-asyncio-loop-and-pools.md`,
+`08a-limits-retries-timeouts.md`, `12a-backpressure-and-streaming.md`,
+`14a-task-queues-cache-batching.md`. This document gives the common foundation
+for all five.
 
-Kontekst: przez cały kurs diagnozujesz jedną aplikację — **asystenta biura
-obsługi zgłoszeń szkodowych** (ubezpieczenia). To serwis FastAPI na asyncio,
-który dla każdego zgłoszenia woła model językowy: streszcza zgłoszenie,
-klasyfikuje je, pisze odpowiedź do klienta, ocenia priorytet, robi
-wielominutową analizę, odpowiada na częste pytania (FAQ). Prawie cały czas
-życia żądania to **czekanie na LLM** — procesor aplikacji się nudzi, a mimo
-to aplikacja potrafi się „zatkać”. Dostawcą LLM jest **atrapa** — własny
-serwer zgodny z Messages API, z którym rozmawia oficjalny SDK `anthropic`;
-ma powtarzalne rozkłady opóźnień, limity, błędy 429/529, streaming i profile
-minutowe. W jednym ćwiczeniu porównasz ją z prawdziwym Claude.
+Context: throughout the course you diagnose one application — a **claims service
+desk assistant** (insurance). It is a FastAPI service on asyncio that calls a
+language model for every claim: it summarizes the claim, classifies it, writes a
+reply to the customer, assesses its priority, runs a multi-minute analysis, and
+answers frequently asked questions (FAQ). Nearly the whole lifetime of a request is
+**waiting for the LLM** — the application's CPU is idle, and yet the application
+can still "clog up". The LLM provider is a **mock** — our own server compatible
+with the Messages API, which the official `anthropic` SDK talks to; it has
+repeatable latency distributions, limits, 429/529 errors, streaming and
+minute-long profiles. In one exercise you compare it with the real Claude.
 
-Liczby w tym dokumencie zostały zmierzone w środowisku kursu (macOS + Docker
-Desktop, Python 3.13, FastAPI 0.162, uvicorn 0.54, anthropic 2.3.0 na httpx2
-2.16, k6 2.3, atrapa w kontenerze) albo wyprowadzone rachunkiem pokazanym w
-tekście. Na innym sprzęcie będą inne — rzędy wielkości i kształty krzywych
-zostają.
-
----
-
-## Latencja, przepustowość, współbieżność
-
-**Definicja.** Trzy wielkości, którymi opiszesz każdy system pod obciążeniem:
-- **Latencja** (czas odpowiedzi, *R*) — ile trwa jedno żądanie od przybycia do
-  ostatniego bajtu odpowiedzi. Mierzy ją klient (albo serwer — to dwie różne
-  liczby, wrócimy do tego).
-- **Przepustowość** (*X*) — ile żądań na sekundę system **kończy**. Nie: ile
-  do niego **przychodzi** — to jest **intensywność dopływu** (*λ*). Dopóki
-  system nadąża, X = λ; gdy nie nadąża, X zatrzymuje się na pojemności, a
-  różnica λ − X ląduje w kolejce.
-- **Współbieżność** (*L*) — ile żądań jest w systemie **naraz** (czekających
-  i obsługiwanych). W asyncio to liczba żywych zadań, w puli — liczba zajętych
-  slotów, u dostawcy — liczba trwających generacji.
-
-**Intuicja.** Autostrada: latencja to czas przejazdu odcinka, przepustowość —
-ile aut na minutę przejeżdża przez bramkę na końcu, współbieżność — ile aut
-jest w tej chwili na odcinku. Korek to sytuacja, w której wjeżdża więcej, niż
-wyjeżdża: przepustowość na bramce się nie zmienia, rośnie tylko liczba aut na
-odcinku i czas przejazdu.
-
-**Po co to.** Każde ćwiczenie kursu sprowadza się do pytania, która z tych
-trzech liczb się psuje i dlaczego. Trzy wielkości są związane prawem Little'a
-(niżej) — znając dwie, liczysz trzecią i sprawdzasz, czy pomiar „się spina”.
-
-**Częsta pomyłka.** „Przepustowość = liczba wysłanych żądań na sekundę”. Raport
-generatora ruchu, który pokazuje *ile wysłał*, nic nie mówi o tym, *ile system
-zrobił*. W ćw. 4 aplikacja dostaje 6 żądań/s, a kończy 2.05/s — reszta czeka
-w gnieździe i w pętli zdarzeń. Zawsze podawaj **osiągnięte** tempo (ukończone /
-czas do ostatniej odpowiedzi), nie zadane.
+The numbers in this document were measured in the course environment (macOS +
+Docker Desktop, Python 3.13, FastAPI 0.162, uvicorn 0.54, anthropic 2.3.0 on httpx2
+2.16, k6 2.3, mock in a container) or derived by a calculation shown in the text.
+On different hardware they will differ — the orders of magnitude and the shapes of
+the curves stay.
 
 ---
 
-## Czekanie vs obsługa
+## Latency, throughput, concurrency
 
-**Definicja.** Czas odpowiedzi rozkładasz na dwie części:
-**R = czas czekania (W_q) + czas obsługi (S)**. Obsługa to praca, którą ktoś
-faktycznie wykonuje dla żądania (tu: generacja u dostawcy, kilka milisekund
-kodu aplikacji). Czekanie to czas, w którym żądanie stoi w kolejce do
-**zasobu**: slotu semafora, połączenia w puli, wątku w puli, procesu
-gunicorna, „mocy” dostawcy.
+**Definition.** Three quantities that describe any system under load:
+- **Latency** (response time, *R*) — how long one request takes, from arrival to
+  the last byte of the response. It is measured by the client (or by the server —
+  those are two different numbers, more on that later).
+- **Throughput** (*X*) — how many requests per second the system **finishes**. Not
+  how many **arrive** — that is the **arrival rate** (*λ*). As long as the system
+  keeps up, X = λ; when it does not, X stops at capacity, and the difference
+  λ − X lands in the queue.
+- **Concurrency** (*L*) — how many requests are in the system **at the same time**
+  (waiting and being served). In asyncio it is the number of live tasks, in a pool
+  — the number of busy slots, at the provider — the number of generations in
+  progress.
 
-W aplikacji LLM pojawia się trzeci rodzaj czasu: **czekanie na odpowiedź z
-zewnątrz**. Z punktu widzenia aplikacji generacja u dostawcy to „obsługa”, ale
-procesor aplikacji w tym czasie nic nie robi — korutyna jest zawieszona na
-`await`. Dlatego w tym kursie „czekanie” zawsze znaczy **czekanie na zasób
-przed wywołaniem**, a „obsługa” — **samo wywołanie LLM** (span `llm.call`).
-Aplikacja raportuje je osobno: atrybut `llm.queue.wait_ms` i histogram
-`llm_queue_wait_seconds` (czekanie na semafor) oraz `llm_call_duration_seconds`
-(wywołanie).
+**Intuition.** A highway: latency is the time to drive a stretch, throughput is how
+many cars per minute pass the toll gate at the end, concurrency is how many cars are
+on the stretch right now. A traffic jam is when more cars enter than leave: the
+throughput at the gate does not change, only the number of cars on the stretch and
+the travel time grow.
 
-**Intuicja.** Urząd: numerek z automatu i czas przy okienku. Pani w okienku
-obsługuje każdego w 3 minuty — to S. Jeśli spędziłeś w urzędzie godzinę, to 57
-minut było czekaniem i *żadna* optymalizacja pracy w okienku (S z 3 do 2.5
-minuty) nie jest tym, czego potrzebujesz. Potrzebujesz więcej okienek albo
-mniej petentów naraz.
+**Why it matters.** Every exercise in the course boils down to the question of which
+of these three numbers is going wrong, and why. The three quantities are tied
+together by Little's law (below) — knowing two, you compute the third and check
+whether the measurement "adds up".
 
-**Po co to.** To pierwsza decyzja diagnostyczna: czy żądanie jest wolne, bo
-**obsługa** jest wolna (dostawca generuje długo, wolny pierwszy token), czy
-dlatego, że **czeka** (za mała pula, limit dostawcy, kolejka za długimi
-żądaniami)? Naprawy są zupełnie inne. W ćw. 6 przy 4 slotach i ruchu 20/s
-czekanie ma p50 32 s, a wywołanie LLM p50 1.06 s — 97% czasu żądania to
-kolejka.
-
-**Częsta pomyłka.** Szukanie przyczyny w profilu CPU. Czekanie nie zużywa CPU
-— zawieszona korutyna i wątek w `Condition.wait` są w profilu niewidoczne albo
-wyglądają jak „bezczynność”. Czekanie widać w trace (luka między przybyciem a
-`llm.call`, span `llm.queue_wait`) i w metrykach zasobów (zajętość = limit).
+**Common mistake.** "Throughput = the number of requests sent per second". A report
+from the load generator that shows *how many it sent* says nothing about *how much
+the system did*. In exercise 4 the application receives 6 requests/s and finishes
+2.05/s — the rest waits in the socket and in the event loop. Always report the
+**achieved** rate (completed / time to the last response), not the target rate.
 
 ---
 
-## System jako sieć kolejek
+## Waiting vs service
 
-**Definicja.** **Kolejka** to miejsce, w którym żądania czekają na **serwer**
-(w sensie teorii kolejek: cokolwiek, co obsługuje jedno żądanie naraz — slot,
-wątek, połączenie, proces). Zbiór *c* identycznych serwerów z jedną kolejką to
-**stacja obsługi**. Aplikacja LLM to **sieć** takich stacji ustawionych jedna
-za drugą — żądanie przechodzi przez każdą i w każdej może czekać:
+**Definition.** You split response time into two parts:
+**R = waiting time (W_q) + service time (S)**. Service is the work someone actually
+does for the request (here: generation at the provider, a few milliseconds of
+application code). Waiting is the time the request stands in the queue for a
+**resource**: a semaphore slot, a connection in the pool, a thread in the pool, a
+gunicorn process, the provider's "capacity".
+
+An LLM application adds a third kind of time: **waiting for a response from the
+outside**. From the application's point of view, generation at the provider is
+"service", but the application's CPU does nothing during that time — the coroutine
+is suspended on `await`. That is why in this course "waiting" always means **waiting
+for a resource before the call**, and "service" means **the LLM call itself** (the
+`llm.call` span). The application reports them separately: the
+`llm.queue.wait_ms` attribute and the `llm_queue_wait_seconds` histogram (waiting
+for the semaphore), and `llm_call_duration_seconds` (the call).
+
+**Intuition.** A government office: the ticket from the machine and the time at the
+window. The clerk serves everyone in 3 minutes — that is S. If you spent an hour in
+the office, then 57 minutes of it was waiting, and *no* optimization of the work at
+the window (S from 3 to 2.5 minutes) is what you need. You need more windows or
+fewer people at once.
+
+**Why it matters.** This is the first diagnostic decision: is the request slow
+because **service** is slow (the provider generates for a long time, a slow first
+token), or because it **waits** (a pool that is too small, a provider limit, a queue
+behind long requests)? The fixes are completely different. In exercise 6, with 4
+slots and traffic of 20/s, waiting has a p50 of 32 s, while the LLM call has a p50 of
+1.06 s — 97% of the request's time is the queue.
+
+**Common mistake.** Looking for the cause in the CPU profile. Waiting does not use
+CPU — a suspended coroutine and a thread in `Condition.wait` are invisible in the
+profile or look like "idle". Waiting shows up in the trace (the gap between arrival
+and `llm.call`, the `llm.queue_wait` span) and in resource metrics (occupancy =
+limit).
+
+---
+
+## The system as a network of queues
+
+**Definition.** A **queue** is a place where requests wait for a **server** (in the
+queueing-theory sense: anything that serves one request at a time — a slot, a
+thread, a connection, a process). A set of *c* identical servers with one queue is a
+**service center**. An LLM application is a **network** of such service centers
+placed one after another — a request passes through each of them and can wait in
+each:
 
 ```
- klient (k6)
-   │  backlog gniazda (jądro) ── proces gunicorna / uvicorna    [ćw. 7]
+ client (k6)
+   │  socket backlog (kernel) ── gunicorn / uvicorn process        [ex. 7]
    ▼
- pętla zdarzeń asyncio (1 wątek)  ◄── blokada pętli: wszyscy czekają   [ćw. 4]
+ asyncio event loop (1 thread)  ◄── blocking the loop: everyone waits  [ex. 4]
    │
-   ├─► pula wątków anyio (40)     ◄── kod synchroniczny w `def`        [ćw. 5]
+   ├─► anyio thread pool (40)     ◄── synchronous code in `def`        [ex. 5]
    │
-   ├─► limit kolejki / odrzucanie (503 + Retry-After)                  [ćw. 12]
+   ├─► queue limit / load shedding (503 + Retry-After)                 [ex. 12]
    ▼
- semafor LLM (sloty per klasa: krótkie / długie)                       [ćw. 1, 6, 12]
+ LLM semaphore (slots per class: short / long)                         [ex. 1, 6, 12]
    │
-   ├─► limiter tempa (RPM / ITPM / OTPM wg nagłówków dostawcy)         [ćw. 8]
+   ├─► rate limiter (RPM / ITPM / OTPM per provider headers)           [ex. 8]
    ▼
- pula połączeń httpx2 (max_connections)                               [ćw. 6]
-   │                                     ┌─► kolejka zadań Redis + worker [ćw. 14]
+ httpx2 connection pool (max_connections)                              [ex. 6]
+   │                                     ┌─► Redis task queue + worker [ex. 14]
    ▼                                     │
- dostawca LLM: kolejka u dostawcy → moc generacji (np. 8 naraz) → 429/529 [ćw. 8, 9, 11]
+ LLM provider: provider queue → generation capacity (e.g. 8 at once) → 429/529 [ex. 8, 9, 11]
 ```
 
-Każda stacja ma swój **limit** (rozmiar), swoją **kolejkę** (jawną albo
-ukrytą) i swój sposób **zawodzenia** po przepełnieniu: kolejka rośnie w
-nieskończoność, żądanie dostaje wyjątek (`PoolTimeout`), błąd HTTP (429, 529,
-503) albo połączenie zostaje zerwane (backlog gniazda pełny).
+Every service center has its own **limit** (size), its own **queue** (explicit or
+hidden) and its own way of **failing** once it overflows: the queue grows without
+bound, the request gets an exception (`PoolTimeout`), an HTTP error (429, 529, 503),
+or the connection is dropped (socket backlog full).
 
-**Intuicja.** Lotnisko: kolejka do odprawy, kontrola bezpieczeństwa, bramka,
-pas startowy. Pasażer może czekać w każdym punkcie; to, że odprawa jest szybka,
-nic nie da, jeśli kontrola ma jedno stanowisko. **Wąskie gardło** to stacja,
-której wykorzystanie pierwsze dochodzi do 100% — za nią ruch jest „rozrzedzony”,
-przed nią rośnie kolejka.
+**Intuition.** An airport: the check-in queue, security, the gate, the runway. A
+passenger can wait at every point; the fact that check-in is fast does not help if
+security has a single lane. The **bottleneck** is the service center whose
+utilization reaches 100% first — behind it traffic is "thinned out", in front of it
+the queue grows.
 
-**Po co to.** Mapa stacji to lista miejsc, gdzie szukać czekania, i lista
-liczników, które musisz mieć: dla każdej stacji **zajętość** (ile slotów
-zajętych), **czekający** (ile w kolejce) i **wiek najstarszego czekającego**.
-Aplikacja kursu wystawia je dla semafora (`llm_inflight`, `llm_waiting`,
-`llm_oldest_waiting_age_seconds`), atrapa — dla dostawcy
-(`mock_llm_generating`, `mock_llm_provider_queue`,
-`mock_llm_oldest_inflight_seconds`), eksporter kolejki zadań — dla Redisa
-(`kolejka_lag`, `kolejka_wiek_najstarszego_s`).
+**Why it matters.** The map of service centers is a list of places to look for
+waiting, and a list of counters you must have: for each service center, the
+**occupancy** (how many slots are busy), the **waiting** (how many are in the queue)
+and the **age of the oldest waiting request**. The course application exposes them
+for the semaphore (`llm_inflight`, `llm_waiting`, `llm_oldest_waiting_age_seconds`),
+the mock — for the provider (`mock_llm_generating`, `mock_llm_provider_queue`,
+`mock_llm_oldest_inflight_seconds`), and the task-queue exporter — for Redis
+(`queue_lag`, `queue_oldest_age_seconds`).
 
-**Częsta pomyłka.** „Kolejki mamy tylko tam, gdzie jest napisane `Queue`”.
-Każdy limit tworzy kolejkę, także niejawną: `asyncio.Semaphore` trzyma listę
-czekających korutyn, pula httpx2 — listę czekających na połączenie, anyio —
-na token wątku, jądro — na `accept()`. Najgroźniejsze są te, których nie
-mierzysz: w ćw. 6 pula połączeń (8) mniejsza niż semafor (64) tworzy kolejkę,
-której span `llm.queue_wait` w ogóle nie pokazuje — czas czekania na
-połączenie wlicza się do „wywołania LLM”. Dowodem jest dopiero licznik po
-stronie dostawcy: `mock_llm_generating` nigdy nie przekracza 8.
+**Common mistake.** "We only have queues where it says `Queue`". Every limit creates
+a queue, including a hidden one: `asyncio.Semaphore` keeps a list of waiting
+coroutines, the httpx2 pool — a list of those waiting for a connection, anyio — for
+a thread token, the kernel — for `accept()`. The most dangerous ones are those you do
+not measure: in exercise 6 a connection pool (8) smaller than the semaphore (64)
+creates a queue that the `llm.queue_wait` span does not show at all — the time spent
+waiting for a connection is counted as part of the "LLM call". The proof only comes
+from the counter on the provider's side: `mock_llm_generating` never exceeds 8.
 
 ---
 
-## Prawo Little'a
+## Little's law
 
-**Definicja.** Dla dowolnego stabilnego systemu (takiego, który na dłuższą
-metę kończy tyle, ile dostaje) średnio:
+**Definition.** For any stable system (one that in the long run finishes as much as
+it receives), on average:
 
 > **L = λ · W**
 
-gdzie **L** — średnia liczba żądań w systemie, **λ** — średnia intensywność
-dopływu (= przepustowość, gdy system nadąża), **W** — średni czas pobytu w
-systemie. Prawo nie zależy od rozkładów, kolejności obsługi ani liczby
-serwerów. Działa dla całego systemu i dla każdej stacji osobno (np. dla samego
-semafora: L = liczba zajętych slotów, W = czas wywołania LLM).
+where **L** is the average number of requests in the system, **λ** is the average
+arrival rate (= throughput, when the system keeps up), **W** is the average time in
+the system. The law does not depend on distributions, on the service order, or on
+the number of servers. It works for the whole system and for each service center
+separately (e.g. for the semaphore alone: L = the number of busy slots, W = the LLM
+call time).
 
-**Intuicja.** Bar: przychodzi 30 osób na godzinę, każda siedzi średnio 2
-godziny → w środku jest średnio 60 osób. Nie trzeba nikogo liczyć przy drzwiach.
+**Intuition.** A bar: 30 people arrive per hour, each stays 2 hours on average → on
+average there are 60 people inside. You do not need to count anyone at the door.
 
-**Po co to.** Trzy zastosowania, wszystkie w kursie:
+**Why it matters.** Three uses, all of them in the course:
 
-1. **Pojemność z rozmiaru puli.** Stacja z *c* slotami i czasem obsługi *S*
-   nie przepuści więcej niż **X_max = c / S**. Po ćw. 6 semafor krótkich ma 32
-   sloty, a streszczenie trwa 1.06 s: X_max = 32 / 1.06 ≈ **30.2/s**. Rampa w
-   ćw. 3 mierzy dokładnie to: tempo rośnie 8 → 15 → 20.5 → 29.2 → 29.8 →
-   30.2/s i staje, `llm_inflight` dochodzi do 32 i się przykleja. Przy 4
-   slotach (szkielet) X_max = 4 / 1.05 ≈ **3.8/s** — dlatego w ćw. 2 ruch
-   4/s wystarcza, żeby kolejka rosła.
-2. **Rozmiar puli z ruchu.** Ile slotów potrzeba dla 20 streszczeń/s?
-   L = 20 × 1.06 = **21.2** zajętych średnio. Mniej niż 21 slotów = kolejka
-   rośnie bez końca; dokładnie 22 = system na granicy, z ogromnym czekaniem
-   (patrz „kolano” niżej). Margines liczysz w czytance 01a.
-3. **Kontrola spójności pomiaru.** W ćw. 7 gunicorn dostaje 15 żądań/s po
-   3.5 s → L = 15 × 3.5 ≈ **52** żądań naraz. Workery synchroniczne obsługują
-   jedno żądanie na proces; 29 procesów to X_max = 29 / 3.5 ≈ 8.3/s (zmierzone
-   9.05/s — część wywołań była krótsza). Dwa procesy UvicornWorker po 32 sloty
-   to 64 / 3.5 ≈ 18.3/s > 15/s — mieści się.
+1. **Capacity from pool size.** A service center with *c* slots and service time *S*
+   cannot pass more than **X_max = c / S**. After exercise 6 the short-class
+   semaphore has 32 slots, and a summary takes 1.06 s: X_max = 32 / 1.06 ≈
+   **30.2/s**. The ramp in exercise 3 measures exactly that: the rate grows 8 → 15 →
+   20.5 → 29.2 → 29.8 → 30.2/s and stops, `llm_inflight` reaches 32 and sticks.
+   With 4 slots (the skeleton) X_max = 4 / 1.05 ≈ **3.8/s** — which is why in
+   exercise 2 traffic of 4/s is enough for the queue to grow.
+2. **Pool size from traffic.** How many slots do you need for 20 summaries/s?
+   L = 20 × 1.06 = **21.2** busy on average. Fewer than 21 slots = the queue grows
+   without end; exactly 22 = the system is at its limit, with huge waiting (see "the
+   knee" below). You compute the headroom in reading 01a.
+3. **Measurement consistency check.** In exercise 7 gunicorn receives 15 requests/s
+   at 3.5 s each → L = 15 × 3.5 ≈ **52** requests at once. Synchronous workers
+   handle one request per process; 29 processes give X_max = 29 / 3.5 ≈ 8.3/s
+   (measured 9.05/s — some of the calls were shorter). Two UvicornWorker processes
+   with 32 slots each give 64 / 3.5 ≈ 18.3/s > 15/s — it fits.
 
-**Little przy W liczonym w minutach.** Prawo nie zna jednostek, ale skutki
-skali są brutalne. Analiza trwa średnio ~153 s (generacja U[60, 240] s +
-kilka sekund TTFT). Przy dopływie zaledwie **0.4 analizy/s**:
-L = 0.4 × 153 ≈ **61** analiz trwa naraz. Pula 16 slotów dla długich daje
-X_max = 16 / 153 ≈ **0.105/s** — czterokrotnie za mało. W ćw. 12 po 180 s
-dopływu: przyszło 73 długich, zaległość 16 w toku + 46 czeka (rachunek:
-(0.4 − 0.105) × 180 ≈ 53 nadmiaru). Ten sam rachunek przy W = 120 s ciszy
-dostawcy (ćw. 10): 2 żądania/s × 120 s = 240 potrzebnych slotów — 32 sloty
-zapełniają się w 16 s, potem wszyscy czekają.
+**Little with W measured in minutes.** The law knows no units, but the consequences
+of scale are brutal. An analysis takes ~153 s on average (generation U[60, 240] s +
+a few seconds of TTFT). With an arrival rate of just **0.4 analyses/s**:
+L = 0.4 × 153 ≈ **61** analyses run at once. A pool of 16 slots for long requests
+gives X_max = 16 / 153 ≈ **0.105/s** — four times too little. In exercise 12, after
+180 s of inflow: 73 long requests arrived, the backlog is 16 in progress + 46
+waiting (calculation: (0.4 − 0.105) × 180 ≈ 53 excess). The same calculation for
+W = 120 s of provider silence (exercise 10): 2 requests/s × 120 s = 240 slots needed
+— 32 slots fill up in 16 s, and then everyone waits.
 
-**Częsta pomyłka.** Stosowanie Little'a do systemu niestabilnego. Gdy
-λ > X_max, „średnie L” nie istnieje — kolejka rośnie liniowo z czasem testu, a
-każda „średnia latencja” z raportu zależy od tego, jak długo trwał test.
-Druga pomyłka: mieszanie λ wejścia z X wyjścia. W systemie przeciążonym użyj
-X (osiągniętego) i W ukończonych żądań — inaczej rachunek się nie zamknie.
+**Common mistake.** Applying Little's law to an unstable system. When λ > X_max, the
+"average L" does not exist — the queue grows linearly with test time, and every
+"average latency" in the report depends on how long the test lasted. The second
+mistake: mixing the input λ with the output X. In an overloaded system use X
+(achieved) and the W of completed requests — otherwise the calculation will not
+close.
 
 ---
 
-## Wykorzystanie i czas oczekiwania: kolano krzywej
+## Utilization and waiting time: the knee of the curve
 
-**Definicja.** **Wykorzystanie** (*ρ*, *utilization*) stacji to odsetek czasu,
-w którym jej serwery pracują: **ρ = λ · S / c**. Kluczowe zjawisko teorii
-kolejek: czas czekania nie rośnie z ρ liniowo, tylko jak **1 / (1 − ρ)** —
-powoli przy małym obciążeniu i gwałtownie, gdy ρ zbliża się do 1. Punkt, w
-którym krzywa „zakręca w górę”, to **kolano**.
+**Definition.** The **utilization** (*ρ*) of a service center is the fraction of time
+its servers are busy: **ρ = λ · S / c**. The key phenomenon in queueing theory:
+waiting time does not grow linearly with ρ, but like **1 / (1 − ρ)** — slowly at low
+load and sharply as ρ approaches 1. The point where the curve "bends upward" is the
+**knee**.
 
-Najprostszy model, **M/M/1** (dopływ Poissona — przybycia niezależne,
-wykładniczy czas obsługi, jeden serwer, kolejka bez limitu), ma wzory
-zamknięte (μ = 1/S — tempo obsługi):
+The simplest model, **M/M/1** (Poisson arrivals — independent arrivals, exponential
+service time, one server, an unbounded queue), has closed-form formulas
+(μ = 1/S — the service rate):
 
 > **W = 1 / (μ − λ) = S / (1 − ρ)**  **W_q = ρ · S / (1 − ρ)**  **L_q = ρ² / (1 − ρ)**
 
-Interpretacja: przy ρ = 0.5 żądanie spędza w systemie **2×** czas obsługi,
-przy 0.9 — **10×**, przy 0.99 — **100×**. Dla S = 1.06 s (streszczenie):
+Interpretation: at ρ = 0.5 a request spends **2×** the service time in the system,
+at 0.9 — **10×**, at 0.99 — **100×**. For S = 1.06 s (a summary):
 
-| ρ | W (całość) | W_q (czekanie) | W / S | L_q (średnio w kolejce) |
+| ρ | W (total) | W_q (waiting) | W / S | L_q (average in the queue) |
 |---|---|---|---|---|
 | 0.50 | 2.12 s | 1.06 s | 2 | 0.5 |
 | 0.70 | 3.53 s | 2.47 s | 3.3 | 1.6 |
@@ -239,13 +246,13 @@ przy 0.9 — **10×**, przy 0.99 — **100×**. Dla S = 1.06 s (streszczenie):
 | 0.95 | 21.2 s | 20.1 s | 20 | 18 |
 | 0.99 | 106 s | 105 s | 100 | 98 |
 
-**M/M/c** (ten sam dopływ, *c* serwerów, wspólna kolejka) zachowuje się
-jakościowo tak samo, ale kolano przesuwa się **w prawo i robi się ostrzejsze**,
-im więcej serwerów. Wiele serwerów „wygładza” przypadkowe skupiska przybyć:
-gdy jeden jest zajęty, inny akurat się zwalnia. Rachunek (wzór Erlanga C,
-skrypt weryfikacyjny kursu) dla c = 32 i S = 1.06 s:
+**M/M/c** (the same arrivals, *c* servers, a shared queue) behaves qualitatively the
+same, but the knee moves **to the right and gets sharper** the more servers there
+are. Many servers "smooth out" random bursts of arrivals: when one is busy, another
+is just becoming free. The calculation (the Erlang C formula, the course's
+verification script) for c = 32 and S = 1.06 s:
 
-| ρ | λ | P(trzeba czekać) | W_q |
+| ρ | λ | P(must wait) | W_q |
 |---|---|---|---|
 | 0.70 | 21.1/s | 4% | 0.004 s |
 | 0.80 | 24.2/s | 16% | 0.03 s |
@@ -253,366 +260,381 @@ skrypt weryfikacyjny kursu) dla c = 32 i S = 1.06 s:
 | 0.95 | 28.7/s | 70% | 0.46 s |
 | 0.99 | 29.9/s | 93% | 3.1 s |
 
-Porównaj z M/M/1 przy ρ = 0.9: tam czekanie to 9× czas obsługi, tu 0.14×.
-Ale przy 0.99 czekanie i tak eksploduje. Rampa z ćw. 3 pokazuje to na żywo:
-do ~20/s czekanie p90 = 0, przy 29.2/s (ρ ≈ 0.97) — 1.6 s, przy 30.2/s —
-9.7 s i rośnie z każdą sekundą testu.
+Compare with M/M/1 at ρ = 0.9: there, waiting is 9× the service time, here 0.14×.
+But at 0.99 waiting explodes anyway. The ramp from exercise 3 shows it live: up to
+~20/s the p90 of waiting is 0, at 29.2/s (ρ ≈ 0.97) it is 1.6 s, at 30.2/s — 9.7 s
+and growing with every second of the test.
 
-**Zmienność** to drugi, równie ważny czynnik. Czas czekania rośnie z
-wariancją przybyć i czasów obsługi. Ruch „wszystkie streszczenia po ~1 s” to
-mała wariancja; ruch mieszany „80% po 1 s + 20% po 60–240 s” to wariancja
-gigantyczna — przy tym samym średnim ρ kolejka jest wielokrotnie dłuższa, a
-krótkie żądania czekają za długimi (head-of-line blocking, czytanka 01a, ćw. 12).
+**Variability** is the second, equally important factor. Waiting time grows with the
+variance of arrivals and of service times. Traffic of "all summaries at ~1 s" is
+low variance; mixed traffic of "80% at 1 s + 20% at 60–240 s" is gigantic variance —
+at the same average ρ the queue is many times longer, and short requests wait behind
+long ones (head-of-line blocking, reading 01a, exercise 12).
 
-**Intuicja.** Kasa w sklepie przy 50% zajętości: zwykle podchodzisz od razu,
-czasem czekasz na jedną osobę. Przy 95% zawsze ktoś stoi, a jedna osoba z
-pełnym wózkiem (duża wariancja) zatrzymuje całą kolejkę na kwadrans. Dziesięć
-kas z jedną kolejką (M/M/c) radzi sobie dużo lepiej niż dziesięć kas z osobnymi
-kolejkami — ale pod warunkiem, że wózek z kwadransem zakupów nie trafia do
-wspólnej kolejki z koszykami.
+**Intuition.** A shop checkout at 50% utilization: you usually walk up right away,
+sometimes you wait for one person. At 95% someone is always standing there, and one
+person with a full cart (high variance) holds up the whole queue for a quarter of an
+hour. Ten checkouts with one shared queue (M/M/c) do much better than ten checkouts
+with separate queues — but only as long as the cart with a quarter of an hour of
+shopping does not end up in the shared queue with the baskets.
 
-**Po co to.** Wyjaśnia, dlaczego „system pracuje na 85% i jest w porządku”
-potrafi jednego dnia zamienić się w „p99 = minuta” po wzroście ruchu o 10%.
-Wyjaśnia też, dlaczego planujesz pojemność **z marginesem** (docelowe ρ 0.7–0.8,
-nie 0.95) i dlaczego separujesz klasy żądań o różnych czasach.
+**Why it matters.** It explains why "the system runs at 85% and it's fine" can turn,
+one day, into "p99 = a minute" after traffic grows by 10%. It also explains why you
+plan capacity **with headroom** (target ρ of 0.7–0.8, not 0.95) and why you separate
+request classes with different service times.
 
-**Częsta pomyłka.** Traktowanie wzorów M/M/1 jako prognozy liczbowej dla
-prawdziwego systemu. Rzeczywiste czasy LLM nie są wykładnicze, przybycia z k6
-nie są Poissona (`constant-arrival-rate` wysyła równo co 1/λ), sloty nie są
-jedną stacją. Model daje **kształt** (gdzie kolano, co się dzieje przy ρ → 1,
-że wariancja szkodzi) — liczby bierzesz z pomiaru (rampa, ćw. 3).
-
----
-
-## Gdy dopływ przekracza pojemność
-
-**Definicja.** Przy λ > X_max system jest **przeciążony**: kolejka rośnie
-liniowo w tempie **λ − X_max**, a czas czekania k-tego żądania (przy równym
-dopływie) wynosi w przybliżeniu **k / X_max − k / λ**. Nie istnieje żaden stan
-ustalony. Po zakończeniu dopływu system jeszcze długo pracuje — **opróżnianie**
-(*drain*) trwa około **zaległość / X_max**.
-
-**Intuicja.** Wanna z odpływem 3.8 l/s i kranem 20 l/s. Poziom wody rośnie o
-16 l/s i nie ma znaczenia, czy odpływ jest „szybki” — liczy się różnica.
-
-**Po co to.** Ćw. 6, rachunek do sprawdzenia na pomiarze: 4 sloty, S = 1.06 s →
-X_max = 3.77/s; dopływ 20/s × 15 s = 300 żądań. Kolejka rośnie o 16.2/s.
-150. żądanie czeka 150 / 3.77 − 150 / 20 ≈ **32.3 s** (zmierzone p50: 32.3 s),
-297. — 297 / 3.77 − 297 / 20 ≈ **63.9 s** (zmierzone p99: 63.1 s). Opróżnienie
-300 żądań trwa 300 / 3.77 ≈ 80 s, choć dopływ trwał 15 s. Przy wywołaniach
-wielominutowych drain liczy się w minutach: w ćw. 12 po końcu dopływu zostaje
-16 długich w toku i 8 czekających; 24 / 0.105 ≈ 230 s jako górne oszacowanie
-(część pracy jest już zrobiona) — zmierzone 213 s.
-
-**Częsta pomyłka.** Kończenie testu razem z dopływem. Raport k6 z ostatniej
-sekundy dopływu nie zawiera żądań, które jeszcze czekają — a to one są
-najgorsze. Testy w kursie mierzą **zaległość na koniec dopływu** i **czas
-opróżniania** osobno (`scripts/pomiar.py`), a k6 ma `gracefulStop` dłuższy niż
-najdłuższe żądanie (domyślne 30 s zerwałoby wielominutowe żądania w toku i
-zafałszowało wynik — zmierzone przy budowie kursu).
+**Common mistake.** Treating the M/M/1 formulas as a numeric forecast for a real
+system. Real LLM times are not exponential, k6 arrivals are not Poisson
+(`constant-arrival-rate` sends exactly every 1/λ), and slots are not a single
+service center. The model gives you the **shape** (where the knee is, what happens as
+ρ → 1, that variance hurts) — you take the numbers from measurement (the ramp,
+exercise 3).
 
 ---
 
-## Percentyle i ogon
+## When the arrival rate exceeds capacity
 
-**Definicja.** **Percentyl p** (p50, p90, p99) to wartość, poniżej której
-leży p% pomiarów. p50 = mediana — „typowe” żądanie; p99 — 1 na 100 jest
-gorsze. **Ogon** to górna część rozkładu (p99, p99.9, max). Percentyli nie
-wolno uśredniać (średnia p99 z pięciu instancji ≠ p99 całości) — liczy się je
-z połączonego rozkładu, np. z histogramu: `histogram_quantile(0.99, sum by (le)(rate(..._bucket[1m])))`.
+**Definition.** When λ > X_max the system is **overloaded**: the queue grows
+linearly at a rate of **λ − X_max**, and the waiting time of the k-th request (with
+even arrivals) is approximately **k / X_max − k / λ**. There is no steady state.
+After the inflow ends, the system keeps working for a long time — **draining** takes
+about **backlog / X_max**.
 
-**Intuicja.** Średnia płaca w firmie z prezesem jest bez sensu; mediana mówi,
-ile zarabia typowy pracownik, p99 — ile zarabia zarząd. Latencja ma ten sam
-problem: kilka żądań po 2 minuty zrobi ze „średniej 1.5 s” liczbę, która nie
-opisuje nikogo.
+**Intuition.** A bathtub with a drain of 3.8 l/s and a tap of 20 l/s. The water level
+rises by 16 l/s, and it does not matter whether the drain is "fast" — what counts is
+the difference.
 
-**Po co to.** Ogon jest tym, co czują użytkownicy i co mnoży się w systemie.
-Strona, która woła 10 usług, trafi przynajmniej raz w p99 z prawdopodobieństwem
-1 − 0.99¹⁰ ≈ **9.6%**, przy 50 wywołaniach — **39.5%**. Ogon jest też pierwszym
-miejscem, gdzie widać kolejkę: w rampie z ćw. 3 p90 czekania rośnie od zera
-wcześniej niż mediana. I wreszcie — w aplikacji LLM ogon jest **zaprojektowany**:
-analizy trwające 60–300 s to nie anomalia, tylko osobna klasa. Dlatego kurs
-raportuje percentyle **per klasa** (krótkie / długie), nie łącznie.
+**Why it matters.** Exercise 6, a calculation to check against the measurement: 4
+slots, S = 1.06 s → X_max = 3.77/s; inflow of 20/s × 15 s = 300 requests. The queue
+grows by 16.2/s. The 150th request waits 150 / 3.77 − 150 / 20 ≈ **32.3 s**
+(measured p50: 32.3 s), the 297th — 297 / 3.77 − 297 / 20 ≈ **63.9 s** (measured
+p99: 63.1 s). Draining 300 requests takes 300 / 3.77 ≈ 80 s, even though the inflow
+lasted 15 s. With multi-minute calls the drain is counted in minutes: in exercise 12,
+after the inflow ends, 16 long requests remain in progress and 8 waiting;
+24 / 0.105 ≈ 230 s as an upper estimate (part of the work is already done) —
+measured 213 s.
 
-**Częsta pomyłka.** p99 z małej próby. Z 300 żądań nad p99 leżą 3 — jedna
-zmiana sekwencji przesuwa p99 o sekundy. Druga: histogram z kubełkami
-kończącymi się na 10 s dla czasów liczonych w minutach — wszystko powyżej
-ląduje w `+Inf` i kwantyl jest „ucięty”. Histogramy kursu (np. czekanie u
-dostawcy w atrapie) mają kubełki do 300 s właśnie dlatego.
-
----
-
-## Model otwarty vs zamknięty i coordinated omission
-
-**Definicja.** Generator ruchu działa w jednym z dwóch modeli:
-- **Zamknięty** — stała liczba *N* „użytkowników” (w k6: VU, executor
-  `constant-vus`); każdy wysyła żądanie, **czeka na odpowiedź**, odczekuje
-  *Z* (czas namysłu) i wysyła kolejne. Przepustowość wynika z odpowiedzi:
-  **X = N / (R + Z)** (prawo czasu odpowiedzi — Little dla zamkniętej pętli).
-- **Otwarty** — żądania przychodzą w zadanym tempie λ, **niezależnie** od
-  tego, czy poprzednie się skończyły (k6: `constant-arrival-rate`,
-  `ramping-arrival-rate`). Tak zachowuje się większość prawdziwego ruchu:
-  klienci nie wiedzą o sobie nawzajem.
-
-**Coordinated omission** to błąd pomiaru modelu zamkniętego: gdy system
-zwalnia, generator sam **wstrzymuje** wysyłanie (VU czeka na odpowiedź), więc
-nie zmierzy żądań, które w otwartym świecie przyszłyby w tym czasie i
-czekałyby w kolejce. Generator „koordynuje się” z systemem i pomija dokładnie
-te pomiary, które byłyby najgorsze.
-
-**Intuicja.** Badanie kolejki w urzędzie przez 4 ankieterów, z których każdy
-wchodzi dopiero, gdy poprzedni wyjdzie. Nigdy nie zobaczą kolejki, bo sami
-jej nie tworzą — a prawdziwi petenci przychodzą o 8:00 wszyscy naraz.
-
-**Po co to.** Ćw. 2, ta sama nominalna intensywność ~4 żądania/s przy
-pojemności ~3.8/s (4 sloty):
-- zamknięty, 4 VU bez pauzy: 3.75/s (rachunek: 4 / 1.07 s ≈ 3.74), p99 **1.57 s**,
-  czekanie 0 — „wszystko OK”;
-- otwarty, 4/s: osiągnięte 3.52/s, p99 **4.41 s**, czekanie na semaforze p99
-  3.28 s — kolejka rośnie, bo ρ ≈ 1.05.
-
-Z pauzą 1 s te same 4 VU dają 4 / (1.08 + 1) ≈ **1.92/s** (zmierzone 1.92/s) —
-„4 VU” to nie jest „4 żądania/s”. W modelu otwartym k6 ma licznik
-`dropped_iterations`: gdy zabraknie VU do wysłania żądania o czasie, pomiar
-jest nieważny (generator sam stał się wąskim gardłem) — zawsze go sprawdzaj.
-
-**Częsta pomyłka.** „Dałem 100 VU, więc to test na 100 użytkowników i jest
-realistyczny”. 100 VU bez pauzy przy R = 1 s to ~100 żądań/s, przy R = 10 s —
-10/s: obciążenie maleje dokładnie wtedy, gdy system ma problem. Testy
-pojemności, SLO i kolejek w kursie są **otwarte**; zamknięty służy tylko jako
-kontrprzykład (i do modelowania puli workerów, która naprawdę jest zamknięta —
-np. worker kolejki zadań z `--max-async-tasks`).
+**Common mistake.** Ending the test together with the inflow. The k6 report from the
+last second of inflow does not include the requests that are still waiting — and
+those are the worst ones. The tests in the course measure the **backlog at the end of
+inflow** and the **drain time** separately (`scripts/measure.py`), and k6 has a
+`gracefulStop` longer than the longest request (the default 30 s would cut off
+multi-minute requests in progress and falsify the result — measured while building
+the course).
 
 ---
 
-## RED i USE dla tej aplikacji
+## Percentiles and the tail
 
-**Definicja.** Dwie listy kontrolne metryk:
-- **RED** (dla usług, „z zewnątrz”): **R**ate — tempo żądań, **E**rrors —
-  odsetek błędów, **D**uration — rozkład czasu (percentyle).
-- **USE** (dla zasobów, „od środka”): **U**tilization — zajętość,
-  **S**aturation — nasycenie (ile czeka na zasób), **E**rrors — błędy zasobu.
+**Definition.** A **percentile p** (p50, p90, p99) is the value below which p% of
+measurements lie. p50 = the median — the "typical" request; p99 — 1 in 100 is worse.
+The **tail** is the upper part of the distribution (p99, p99.9, max). Percentiles
+must not be averaged (the average of the p99 of five instances ≠ the p99 of the
+whole) — you compute them from the combined distribution, e.g. from a histogram:
+`histogram_quantile(0.99, sum by (le)(rate(..._bucket[1m])))`.
 
-W tej aplikacji:
+**Intuition.** The average salary in a company with a CEO is meaningless; the median
+says what a typical employee earns, p99 — what the board earns. Latency has the same
+problem: a few requests of 2 minutes each will turn an "average of 1.5 s" into a
+number that describes no one.
 
-| Warstwa | RED / USE | Metryka w kursie |
+**Why it matters.** The tail is what users feel and what multiplies in a system. A
+page that calls 10 services hits at least one p99 with a probability of
+1 − 0.99¹⁰ ≈ **9.6%**, with 50 calls — **39.5%**. The tail is also the first place
+where you see the queue: in the ramp from exercise 3 the p90 of waiting rises from
+zero earlier than the median. And finally — in an LLM application the tail is
+**by design**: analyses lasting 60–300 s are not an anomaly, but a separate class.
+That is why the course reports percentiles **per class** (short / long), not in
+total.
+
+**Common mistake.** The p99 of a small sample. Of 300 requests, 3 lie above p99 — one
+change in the sequence moves p99 by seconds. The second: a histogram with buckets
+ending at 10 s for times measured in minutes — everything above lands in `+Inf` and
+the quantile is "truncated". The course's histograms (e.g. waiting at the provider in
+the mock) have buckets up to 300 s for exactly that reason.
+
+---
+
+## Open vs closed model and coordinated omission
+
+**Definition.** A load generator works in one of two models:
+- **Closed** — a fixed number *N* of "users" (in k6: VUs, the `constant-vus`
+  executor); each sends a request, **waits for the response**, waits *Z* (think time)
+  and sends the next one. Throughput results from the responses:
+  **X = N / (R + Z)** (the response time law — Little for a closed loop).
+- **Open** — requests arrive at a given rate λ, **independently** of whether the
+  previous ones have finished (k6: `constant-arrival-rate`, `ramping-arrival-rate`).
+  This is how most real traffic behaves: clients do not know about each other.
+
+**Coordinated omission** is a measurement error of the closed model: when the system
+slows down, the generator itself **holds back** sending (the VU waits for a
+response), so it does not measure the requests that, in an open world, would have
+arrived during that time and waited in the queue. The generator "coordinates" with
+the system and omits exactly those measurements that would be the worst.
+
+**Intuition.** Studying the queue in a government office with 4 interviewers, each of
+whom walks in only after the previous one has left. They will never see a queue,
+because they do not create one themselves — while real visitors all arrive at 8:00
+at once.
+
+**Why it matters.** Exercise 2, the same nominal rate of ~4 requests/s against a
+capacity of ~3.8/s (4 slots):
+- closed, 4 VUs with no pause: 3.75/s (calculation: 4 / 1.07 s ≈ 3.74), p99
+  **1.57 s**, waiting 0 — "everything is OK";
+- open, 4/s: achieved 3.52/s, p99 **4.41 s**, semaphore waiting p99 3.28 s — the
+  queue grows, because ρ ≈ 1.05.
+
+With a 1 s pause the same 4 VUs give 4 / (1.08 + 1) ≈ **1.92/s** (measured 1.92/s) —
+"4 VUs" is not "4 requests/s". In the open model k6 has a `dropped_iterations`
+counter: when there are not enough VUs to send a request on time, the measurement is
+invalid (the generator itself became the bottleneck) — always check it.
+
+**Common mistake.** "I gave it 100 VUs, so it's a test for 100 users and it's
+realistic". 100 VUs with no pause at R = 1 s is ~100 requests/s, at R = 10 s —
+10/s: the load shrinks exactly when the system has a problem. The capacity, SLO and
+queue tests in the course are **open**; the closed model serves only as a
+counterexample (and for modeling a worker pool, which really is closed — e.g. a
+task-queue worker with `--max-async-tasks`).
+
+---
+
+## RED and USE for this application
+
+**Definition.** Two metric checklists:
+- **RED** (for services, "from the outside"): **R**ate — the request rate,
+  **E**rrors — the error fraction, **D**uration — the time distribution
+  (percentiles).
+- **USE** (for resources, "from the inside"): **U**tilization — occupancy,
+  **S**aturation — how much waits for the resource, **E**rrors — resource errors.
+
+In this application:
+
+| Layer | RED / USE | Metric in the course |
 |---|---|---|
-| endpointy | R, E, D | `app_requests_total{endpoint,klasa,wynik}`, `app_request_duration_seconds_bucket` |
-| semafor LLM | U, S | `llm_inflight{klasa}` vs liczba slotów; `llm_waiting`, `llm_oldest_waiting_age_seconds`, `llm_queue_wait_seconds` |
-| wywołanie LLM | D, E | `llm_call_duration_seconds{dostawca,wynik}`, `llm_ttft_seconds` |
-| HTTP do dostawcy | R, E | `llm_http_attempts_total`, `llm_http_responses_total{status}` (429, 529) |
-| pętla zdarzeń | S | `app_event_loop_lag_seconds`, `/diag/ping` |
-| dostawca (atrapa) | U, S, E | `mock_llm_generating`, `mock_llm_provider_queue`, `mock_llm_requests_total{status}`, `mock_llm_cancelled_total` |
-| kolejka zadań | S | `kolejka_lag`, `kolejka_pending`, `kolejka_wiek_najstarszego_s` |
-| klient (k6) | R, D | `k6_http_reqs_total`, `k6_http_req_duration_p99`, `k6_dropped_iterations_total` |
+| endpoints | R, E, D | `app_requests_total{endpoint,request_class,outcome}`, `app_request_duration_seconds_bucket` |
+| LLM semaphore | U, S | `llm_inflight{request_class}` vs the number of slots; `llm_waiting`, `llm_oldest_waiting_age_seconds`, `llm_queue_wait_seconds` |
+| LLM call | D, E | `llm_call_duration_seconds{provider,outcome}`, `llm_ttft_seconds` |
+| HTTP to the provider | R, E | `llm_http_attempts_total`, `llm_http_responses_total{status}` (429, 529) |
+| event loop | S | `app_event_loop_lag_seconds`, `/diag/ping` |
+| provider (mock) | U, S, E | `mock_llm_generating`, `mock_llm_provider_queue`, `mock_llm_requests_total{status}`, `mock_llm_cancelled_total` |
+| task queue | S | `queue_lag`, `queue_pending`, `queue_oldest_age_seconds` |
+| client (k6) | R, D | `k6_http_reqs_total`, `k6_http_req_duration_p99`, `k6_dropped_iterations_total` |
 
-Ważne: `wynik` rozróżnia **ok, odrzucone, przeterminowane, anulowane,
-timeout_dostawcy, limit_dostawcy, blad_dostawcy**. „Błąd” to w systemie z
-backpressure kilka różnych rzeczy: szybkie 503 od nas jest **zdrowe**
-(odmowa), 504 po minucie — nie.
+Important: `outcome` distinguishes **ok, rejected, deadline_exceeded, cancelled,
+provider_timeout, provider_rate_limited, provider_error**. An "error" in a system
+with backpressure is several different things: a fast 503 from us is **healthy** (a
+refusal), a 504 after a minute is not.
 
-**Intuicja.** RED to termometr pacjenta (gorączka, ma czy nie ma), USE —
-badania narządów (który organ jest przeciążony). Najpierw RED mówi, *że*
-jest źle i *gdzie* (który endpoint, która klasa); potem USE wskazuje, *który
-zasób* jest nasycony.
+**Intuition.** RED is a patient's thermometer (fever or no fever), USE is the organ
+tests (which organ is overloaded). First RED tells you *that* something is wrong and
+*where* (which endpoint, which class); then USE points to *which resource* is
+saturated.
 
-**Po co to.** Pozwala zacząć każdą diagnozę od taniego przeglądu, a nie od
-przypadkowego grzebania: „p99 krótkich wzrosło” (RED) → „`llm_inflight`
-krótkich przyklejone do limitu, `llm_waiting` > 0” (USE semafora) → „u
-dostawcy `generating` daleko od jego mocy” → wąskie gardło jest u nas
-(ćw. 6, finał).
+**Why it matters.** It lets you start every diagnosis with a cheap overview instead
+of random digging: "the p99 of short requests went up" (RED) → "the short class's
+`llm_inflight` is stuck at the limit, `llm_waiting` > 0" (USE of the semaphore) →
+"at the provider, `generating` is far from its capacity" → the bottleneck is on our
+side (exercise 6, the final).
 
-**Częsta pomyłka.** Patrzenie tylko na **U** bez **S**. Zasób zajęty w 100%
-bez kolejki to zasób idealnie dociążony; problemem jest nasycenie — ile
-czeka i jak długo. I odwrotnie: semafor może mieć zajętość 4 z 4 przy
-„niedociążonym” dostawcy — to znaczy, że limitem jest semafor, nie dostawca.
-
----
-
-## Specyfika LLM: TTFT, tokeny, minuty, limity, koszt
-
-**Definicja.** Wywołanie LLM różni się od typowego wywołania bazy danych:
-- **TTFT** (*time to first token*) — czas od wysłania żądania do pierwszego
-  fragmentu odpowiedzi; obejmuje kolejkę u dostawcy i przetworzenie wejścia.
-  Na prawdziwym Claude (Haiku 5.5, sprawdzone przy budowie kursu) mediana
-  0.48–0.72 s, ogon do ~1.2 s.
-- **Tempo generacji** (tokeny/s) — po pierwszym tokenie reszta płynie ze
-  stałą prędkością: realnie ~225–300 tokenów/s. Czas całkowity ≈ TTFT +
-  tokeny_wyjścia / tempo: odpowiedź 700 tokenów ≈ 0.48 + 700 / 225 ≈ 3.6 s
-  (zmierzone 3.62 s). Atrapa domyślnie: TTFT log-normalny z medianą 450 ms,
-  250 tokenów/s.
-- **Czasy od sekund do minut.** Długie zadania (analiza całej teczki szkody,
-  modele z rozumowaniem) trwają **60–300 s**: albo długo milczą przed pierwszym
-  tokenem (długi TTFT), albo długo generują (długi strumień), albo robią pauzy.
-  To pełnoprawna klasa ruchu, nie anomalia.
-- **Limity dostawcy** — liczone per minuta: **RPM** (żądania), **ITPM**
-  (tokeny wejścia), **OTPM** (tokeny wyjścia). Przekroczenie → **429** z
-  `retry-after` i nagłówkami `anthropic-ratelimit-*-remaining/-reset`.
-  Osobny przypadek to **529 overloaded** — dostawca nie ma wolnej mocy (w SDK
-  `OverloadedError`, odrębna klasa od `RateLimitError`).
-- **Koszt** — płacisz za tokeny wejścia i wyjścia (Haiku 5.5: $0.10 / $0.50 za
-  milion). Ponowienie wysyła wejście jeszcze raz; porzucona generacja zużyła
-  moc dostawcy i limit tokenów.
-
-**Intuicja.** Dostawca LLM to drukarnia na zamówienie: najpierw czekasz, aż
-przyjmą zlecenie i przygotują maszynę (TTFT), potem strony wychodzą w stałym
-tempie (tokeny/s). Drukarnia ma limit zleceń i stron na minutę dla Twojej
-firmy (RPM/OTPM) i własną moc maszyn wspólną dla wszystkich klientów (529).
-Każde zlecenie powtórzone „na wszelki wypadek” kosztuje drugi raz.
-
-**Po co to.** Limit tokenów to też pojemność i liczy się jak Little:
-profil `limity` atrapy ma OTPM 12 000; streszczenie to 200 tokenów wyjścia →
-12 000 / 200 = **60 streszczeń/min = 1/s**, niezależnie od liczby slotów.
-Ruch 3/s × 60 s = 180 żądań na pojemność 60 — w ćw. 8 szkielet zbiera 133
-odpowiedzi 429 u atrapy. Po naprawie 429 znika, ale **nadmiar czeka u nas**
-(czekanie p99 58 s) — limiter po stronie klienta nie zwiększa pojemności,
-przenosi kolejkę do miejsca, które kontrolujesz.
-
-**Częsta pomyłka.** „U prawdziwego dostawcy limitów nie widać, więc ich nie
-ma”. Na koncie użytym przy budowie kursu limity były tak wysokie (RPM 13 000,
-OTPM 2 M), że 429 było praktycznie nieosiągalne — dlatego limity ćwiczysz na
-atrapie. Na produkcji z niższym tierem albo przy dużych wsadach (ITPM) to
-pierwsza ściana, w którą uderzysz.
+**Common mistake.** Looking only at **U** without **S**. A resource that is 100% busy
+with no queue is a perfectly loaded resource; the problem is saturation — how many
+wait and for how long. And the other way around: the semaphore can be at 4 busy out
+of 4 while the provider is "underloaded" — that means the limit is the semaphore, not
+the provider.
 
 ---
 
-## Wywołania wielominutowe
+## LLM specifics: TTFT, tokens, minutes, limits, cost
 
-**Definicja.** Żądanie, którego czas obsługi liczy się w minutach (w kursie:
-60–300 s), zmienia wszystkie poprzednie rachunki o rząd albo dwa rzędy
-wielkości: zajmuje slot semafora, połączenie i slot u dostawcy **na minuty**,
-a każdy błąd timeoutu czy ponowienia kosztuje **minuty**.
+**Definition.** An LLM call differs from a typical database call:
+- **TTFT** (*time to first token*) — the time from sending the request to the first
+  fragment of the response; it includes the provider's queue and the processing of
+  the input. On the real Claude (Haiku 5.5, checked while building the course) the
+  median is 0.48–0.72 s, with a tail up to ~1.2 s.
+- **Generation speed** (tokens/s) — after the first token the rest flows at a
+  constant speed: realistically ~225–300 tokens/s. Total time ≈ TTFT +
+  output_tokens / speed: a 700-token response ≈ 0.48 + 700 / 225 ≈ 3.6 s (measured
+  3.62 s). The mock by default: a log-normal TTFT with a median of 450 ms, 250
+  tokens/s.
+- **Times from seconds to minutes.** Long tasks (analyzing a whole claim file,
+  reasoning models) take **60–300 s**: they either stay silent for a long time before
+  the first token (a long TTFT), or generate for a long time (a long stream), or make
+  pauses. This is a full-fledged traffic class, not an anomaly.
+- **Provider limits** — counted per minute: **RPM** (requests), **ITPM** (input
+  tokens), **OTPM** (output tokens). Exceeding them → **429** with `retry-after` and
+  `anthropic-ratelimit-*-remaining/-reset` headers. A separate case is **529
+  overloaded** — the provider has no free capacity (in the SDK `OverloadedError`, a
+  class distinct from `RateLimitError`).
+- **Cost** — you pay for input and output tokens (Haiku 5.5: $0.10 / $0.50 per
+  million). A retry sends the input again; an abandoned generation consumed the
+  provider's capacity and the token limit.
 
-**Intuicja.** Myjnia samochodowa, do której raz na jakiś czas wjeżdża
-autobus. Myjnia jest „szybka”, dopóki autobusy nie zajmą wszystkich stanowisk
-— wtedy auta osobowe stoją pół godziny.
+**Intuition.** An LLM provider is a print shop working to order: first you wait for
+them to accept the job and prepare the machine (TTFT), then the pages come out at a
+steady pace (tokens/s). The print shop has a limit of jobs and pages per minute for
+your company (RPM/OTPM) and its own machine capacity shared by all customers (529).
+Every job repeated "just in case" costs a second time.
 
-**Po co to.** Kurs traktuje je jako główny przypadek, nie przypis:
-- **Zajętość slotów minutami.** L = λ · W: przy W = 153 s nawet 0.4/s daje 61
-  równoległych analiz (wyżej). Każde wywołanie trzyma slot ~150 razy dłużej
-  niż streszczenie.
-- **Head-of-line blocking.** We wspólnej puli 32 slotów (ćw. 12, krótkie 4/s +
-  długie 0.4/s) krótkie czekają **p50 29 s, p99 131 s** przy obsłudze ~1 s —
-  bo sloty zjadły analizy. Osobne pule (32 / 16): czekanie krótkich p99 = 0.
-- **Timeouty.** Domyślny read timeout SDK to 600 s; timeout k6 — 60 s;
-  gunicorn z workerami sync zabija worker po 30 s. Każdy z nich inaczej
-  „przecina” wielominutowe żądanie (czytanka 08a, ćw. 10).
-- **Ponowienia mnożą minuty.** 4 analizy z 90 s ciszy przy timeoucie 60 s i
-  domyślnych 2 ponowieniach SDK: 3 × 60 s ≈ 180 s czekania i błąd 504 po
-  181.6–191.6 s, 10 porzuconych generacji u dostawcy (ćw. 10).
-- **Anulowanie.** Klient, który się rozłączył po 20 s, nie zwalnia slotu sam
-  z siebie: bez anulowania dostawca generuje „do nikogo” jeszcze 173 s;
-  z anulowaniem slot wraca w 0.7 s (ćw. 10).
-- **Drain.** Po końcu dopływu długie żądania pracują jeszcze minuty — wiek
-  najstarszego (`mock_llm_oldest_inflight_seconds`) i zaległość mierzysz po
-  zakończeniu ruchu, nie tylko w trakcie.
+**Why it matters.** The token limit is also capacity, and it is computed like Little:
+the mock's `limits` profile has an OTPM of 12,000; a summary is 200 output tokens →
+12,000 / 200 = **60 summaries/min = 1/s**, regardless of the number of slots.
+Traffic of 3/s × 60 s = 180 requests against a capacity of 60 — in exercise 8 the
+skeleton collects 133 responses with status 429 from the mock. After the fix the 429s disappear,
+but **the excess waits on our side** (waiting p99 58 s) — a client-side limiter does
+not increase capacity, it moves the queue to a place you control.
 
-**Częsta pomyłka.** Testowanie na profilu sekundowym i ekstrapolacja. Profil
-„wszystko po sekundzie” nie odkryje timeoutu 60 s w k6, 30 s w gunicornie,
-pingu utrzymującego połączenie ani tego, że `timeout` SDK nie jest limitem
-całkowitym. Profil sekundowy w kursie służy tylko do szybkiego smoke; ćwiczenia
-o timeoutach, backpressure i finał trwają wall-clock po kilka minut.
+**Common mistake.** "You can't see limits at a real provider, so there aren't any".
+On the account used to build the course the limits were so high (RPM 13,000, OTPM
+2 M) that a 429 was practically unreachable — which is why you practice limits on the
+mock. In production with a lower tier, or with large batches (ITPM), it is the first
+wall you will hit.
 
 ---
 
-## Jak czytać trace, metryki i profil w tym kursie
+## Multi-minute calls
 
-**Definicja.** Trzy rodzaje telemetrii (wszystkie przez OTel do Grafany:
-Tempo, Prometheus, Pyroscope):
-- **Trace** — drzewo **spanów** jednego żądania: każdy span ma początek,
-  koniec, atrybuty i rodzica. Pokazuje, **gdzie żądanie spędziło czas**,
-  łącznie z czasem, w którym nikt nic nie liczył. Struktura w aplikacji:
+**Definition.** A request whose service time is counted in minutes (in the course:
+60–300 s) changes all the earlier calculations by one or two orders of magnitude: it
+occupies a semaphore slot, a connection and a provider slot **for minutes**, and
+every timeout error or retry costs **minutes**.
+
+**Intuition.** A car wash where a bus drives in every now and then. The car wash is
+"fast" until the buses take up all the bays — then the passenger cars stand for half
+an hour.
+
+**Why it matters.** The course treats them as the main case, not a footnote:
+- **Slot occupancy in minutes.** L = λ · W: at W = 153 s even 0.4/s gives 61
+  parallel analyses (above). Every call holds a slot ~150 times longer than a
+  summary.
+- **Head-of-line blocking.** In a shared pool of 32 slots (exercise 12, short 4/s +
+  long 0.4/s) short requests wait **p50 29 s, p99 131 s** with a service time of
+  ~1 s — because the analyses ate the slots. Separate pools (32 / 16): the short
+  requests' waiting p99 = 0.
+- **Timeouts.** The SDK's default read timeout is 600 s; the k6 timeout — 60 s;
+  gunicorn with sync workers kills a worker after 30 s. Each of them "cuts" a
+  multi-minute request differently (reading 08a, exercise 10).
+- **Retries multiply minutes.** 4 analyses with 90 s of silence, a 60 s timeout and
+  the SDK's default 2 retries: 3 × 60 s ≈ 180 s of waiting and a 504 error after
+  181.6–191.6 s, 10 abandoned generations at the provider (exercise 10).
+- **Cancellation.** A client that disconnected after 20 s does not release the slot
+  on its own: without cancellation the provider generates "for nobody" for another
+  173 s; with cancellation the slot returns in 0.7 s (exercise 10).
+- **Drain.** After the inflow ends, long requests keep working for minutes — you
+  measure the age of the oldest (`mock_llm_oldest_inflight_seconds`) and the backlog
+  after the traffic has ended, not only during it.
+
+**Common mistake.** Testing on a seconds-long profile and extrapolating. A profile of
+"everything in a second" will not uncover the 60 s timeout in k6, the 30 s one in
+gunicorn, a ping that keeps the connection alive, or the fact that the SDK's
+`timeout` is not a total limit. The seconds-long profile in the course is only for a
+quick smoke test; the exercises on timeouts, backpressure and the final run
+wall-clock for several minutes.
+
+---
+
+## How to read traces, metrics and profiles in this course
+
+**Definition.** Three kinds of telemetry (all through OTel to Grafana: Tempo,
+Prometheus, Pyroscope):
+- **Trace** — a tree of **spans** of one request: each span has a start, an end,
+  attributes and a parent. It shows **where the request spent its time**, including
+  time when nobody was computing anything. The structure in the application:
   ```
-  POST /claims/{n}/summary            (korzeń: app.klasa, app.wynik, llm.queue.wait_ms)
-   ├─ llm.queue_wait                  (czekanie na semafor — rodzeństwo, nie rodzic llm.call)
-   └─ llm.call                        (llm.dostawca, llm.cb.stan)
-       └─ anthropic.messages.create   (natywny span SDK)
-           └─ POST                    (httpx2: pojedyncza próba HTTP)
+  POST /claims/{n}/summary            (root: app.request_class, app.outcome, llm.queue.wait_ms)
+   ├─ llm.queue_wait                  (waiting for the semaphore — a sibling, not the parent of llm.call)
+   └─ llm.call                        (llm.provider, llm.cb.state)
+       └─ anthropic.messages.create   (the SDK's native span)
+           └─ POST                    (httpx2: a single HTTP attempt)
   ```
-  Luki między spanami to czas, którego nikt nie zarejestrował: blokada pętli,
-  czekanie w puli połączeń, backoff między próbami. Kilka spanów `POST` pod
-  jednym `anthropic.messages.create` = ponowienia SDK.
-- **Metryki** — agregaty w czasie (liczniki, histogramy, gauge). Pokazują
-  **ile i jak często** w całym ruchu: tempo, percentyle, zajętość, kolejki.
-  Nie powiedzą, *które* żądanie, ale powiedzą, *że* problem dotyczy 30% ruchu.
-- **Profil** (Pyroscope) — próbkuje stosy wywołań i pokazuje, **w których
-  funkcjach są wątki** (CPU albo wall). Odpowiada na pytanie „co robi kod”.
+  Gaps between spans are time nobody recorded: loop blocking, waiting in the
+  connection pool, backoff between attempts. Several `POST` spans under one
+  `anthropic.messages.create` = SDK retries.
+- **Metrics** — aggregates over time (counters, histograms, gauges). They show
+  **how much and how often** across all traffic: rate, percentiles, occupancy,
+  queues. They will not tell you *which* request, but they will tell you *that* the
+  problem affects 30% of traffic.
+- **Profile** (Pyroscope) — samples call stacks and shows **which functions the
+  threads are in** (CPU or wall-clock). It answers the question "what is the code
+  doing".
 
-**Intuicja.** Trace to nagranie z kamery jednego klienta w sklepie; metryki
-to licznik przy drzwiach i kamera z lotu ptaka; profil to zdjęcie, co w danej
-chwili robią pracownicy. Klient stojący w kolejce jest na nagraniu (trace),
-w statystyce (metryka czekających), ale na zdjęciu pracowników go nie ma.
+**Intuition.** A trace is a recording from the camera following one customer in a
+shop; metrics are the counter at the door and the bird's-eye camera; a profile is a
+photo of what the employees are doing at a given moment. A customer standing in a
+queue is in the recording (trace), in the statistics (the waiting metric), but not in
+the photo of the employees.
 
-**Po co to.** Każdy rodzaj odpowiada na inne pytanie i ma ślepe plamki:
-- Profil **nie widzi zawieszonej korutyny**. Żądanie czekające 60 s na
-  `await` (semafor, LLM, sleep backoffu) nie zajmuje wątku — nie ma go na
-  żadnym stosie, w żadnym trybie profilu. Sprawdzone przy budowie kursu:
-  `await` na LLM jest niewidoczne zarówno w profilu CPU, jak i wall.
-- Profil **widzi blokadę**: synchroniczny klient LLM w handlerze async w
-  profilu CPU jest prawie niewidoczny (0.4% — czeka na gnieździe, nie liczy),
-  w profilu wall już tak (13%, `SyncStream.read`). Dlatego w ćw. 4 profil jest
-  tylko potwierdzeniem; główny objaw jest systemowy (przepustowość, /health).
-- Trace **nie pokaże kolejki, w której nikt nie postawił spanu** — czekanie w
-  puli połączeń httpx2 nie ma osobnego spanu (ćw. 6), backlog gniazda w ogóle
-  nie jest w trace. Tam pomagają metryki zasobów.
-- Metryki **uśredniają**: histogram czekania z ruchu mieszanego bez etykiety
-  `klasa` ukryje, że krótkie czekają minutę.
+**Why it matters.** Each kind answers a different question and has blind spots:
+- A profile **does not see a suspended coroutine**. A request waiting 60 s on an
+  `await` (semaphore, LLM, backoff sleep) does not occupy a thread — it is on no
+  stack, in no profile mode. Checked while building the course: an `await` on the LLM
+  is invisible in both the CPU profile and the wall-clock one.
+- A profile **sees blocking**: a synchronous LLM client in an async handler is almost
+  invisible in the CPU profile (0.4% — it waits on the socket, it does not compute),
+  but not in the wall-clock one (13%, `SyncStream.read`). That is why in exercise 4
+  the profile is only a confirmation; the main symptom is systemic (throughput,
+  /health).
+- A trace **will not show a queue where nobody put a span** — waiting in the httpx2
+  connection pool has no span of its own (exercise 6), and the socket backlog is not
+  in the trace at all. Resource metrics help there.
+- Metrics **average**: a waiting histogram from mixed traffic without the
+  `request_class` label will hide that short requests wait a minute.
 
-**Częsta pomyłka.** „Profil ma 2% CPU w handlerze, więc handler nie jest
-problemem”. W aplikacji I/O-bound prawie wszystko, co ważne, dzieje się
-**między** próbkami profilu CPU. Druga: span `llm.queue_wait` jako **rodzic**
-`llm.call` — wtedy czas wywołania wlicza się w czekanie i odczyt jest fałszywy;
-w kursie czekanie jest rodzeństwem wywołania (ćw. 1).
+**Common mistake.** "The profile shows 2% CPU in the handler, so the handler is not
+the problem". In an I/O-bound application nearly everything that matters happens
+**between** the samples of the CPU profile. The second: the `llm.queue_wait` span as
+the **parent** of `llm.call` — then the call time is counted as waiting and the
+reading is false; in the course waiting is a sibling of the call (exercise 1).
 
 ---
 
-## Metodyka diagnozy w tym kursie
+## Diagnosis method in this course
 
-**Definicja.** Każde ćwiczenie i incydent idzie tą samą pętlą:
-1. **Objaw z zewnątrz** (RED, raport k6 — z osiągniętym tempem i
+**Definition.** Every exercise and incident follows the same loop:
+1. **Symptom from the outside** (RED, the k6 report — with the achieved rate and
    `dropped_iterations`).
-2. **Hipoteza przed obserwacją** — zanim otworzysz Grafanę, zapisz, co
-   spodziewasz się zobaczyć i dlaczego (Little, kolano, ρ).
-3. **Rozkład czasu** — trace: czekanie vs obsługa vs TTFT vs luki.
-4. **Zasób** — USE: który limit jest przyklejony do maksimum i gdzie rośnie
-   kolejka (u nas czy u dostawcy).
-5. **Rachunek** — czy liczby spinają się z L = λW. Jeśli nie, szukasz kolejki,
-   której nie mierzysz.
-6. **Naprawa i pomiar ponowny** — ten sam ruch, ta sama długość testu, buggy
-   vs fixed; plus stan po końcu dopływu.
+2. **Hypothesis before observation** — before you open Grafana, write down what you
+   expect to see and why (Little, the knee, ρ).
+3. **Time breakdown** — the trace: waiting vs service vs TTFT vs gaps.
+4. **Resource** — USE: which limit is stuck at its maximum and where the queue grows
+   (on our side or at the provider).
+5. **Calculation** — do the numbers add up with L = λW. If not, you are looking for a
+   queue you do not measure.
+6. **Fix and re-measurement** — the same traffic, the same test length, buggy vs
+   fixed; plus the state after the inflow ends.
 
-**Intuicja.** Lekarz: wywiad, hipoteza, badanie, wynik, kontrola po leczeniu.
-Hipoteza przed badaniem chroni przed „widzę wykres, więc wiem”.
+**Intuition.** A doctor: interview, hypothesis, examination, result, a check-up after
+treatment. A hypothesis before the examination protects against "I see a chart, so I
+know".
 
-**Po co to.** Systemy kolejkowe są nieintuicyjne: naprawa w jednym miejscu
-przenosi kolejkę gdzie indziej (ćw. 8: 429 znika, czekanie u nas rośnie;
-ćw. 6: więcej slotów przy zbyt małej puli połączeń nic nie daje). Rachunek
-Little'a i pomiar po naprawie łapią takie przesunięcia.
+**Why it matters.** Queueing systems are counterintuitive: a fix in one place moves
+the queue elsewhere (exercise 8: the 429s disappear, waiting on our side grows;
+exercise 6: more slots with a connection pool that is too small change nothing).
+Little's calculation and the measurement after the fix catch such shifts.
 
-**Częsta pomyłka.** Porównywanie przebiegów o różnej długości albo innym
-modelu ruchu. W systemie przeciążonym p99 rośnie z długością testu — dwa
-przebiegi są porównywalne tylko przy tym samym dopływie, czasie i modelu.
+**Common mistake.** Comparing runs of different lengths or with a different traffic
+model. In an overloaded system p99 grows with test length — two runs are comparable
+only with the same inflow, duration and model.
 
 ---
 
-## Jak to się łączy (mapa)
+## How it all fits together (map)
 
 ```
-            λ (dopływ, model OTWARTY)                         ćw. 2: zamknięty ukrywa kolejkę
+            λ (arrival rate, OPEN model)                      ex. 2: closed hides the queue
                  │
                  ▼
-  ┌──────── stacja: c slotów, czas obsługi S ────────┐        ρ = λ·S/c
-  │ kolejka (W_q)  →  obsługa (S)                    │        L = λ·W        (ćw. 3)
-  │                                                  │        W ~ S/(1−ρ)    (kolano)
+  ┌──────── service center: c slots, service time S ─┐        ρ = λ·S/c
+  │ queue (W_q)  →  service (S)                      │        L = λ·W        (ex. 3)
+  │                                                  │        W ~ S/(1−ρ)    (the knee)
   └──────────────────────────────────────────────────┘
-     ▲ gdzie stacje:                                     gdy λ > c/S:
-     │ pętla zdarzeń (ćw. 4) · pula wątków 40 (ćw. 5)        kolejka rośnie o λ − c/S
-     │ semafor/pula połączeń (ćw. 6) · procesy (ćw. 7)       → limit + odrzucanie (ćw. 12)
-     │ limity RPM/ITPM/OTPM, 429/529 (ćw. 8)                 → nie mnożyć ruchu retry (ćw. 9)
-     │ kolejka zadań (ćw. 14) · cache/batching (ćw. 15–16)   → deadline, anulowanie (ćw. 10)
+     ▲ where the service centers are:                    when λ > c/S:
+     │ event loop (ex. 4) · thread pool 40 (ex. 5)           the queue grows by λ − c/S
+     │ semaphore/connection pool (ex. 6) · processes (ex. 7) → limit + shedding (ex. 12)
+     │ RPM/ITPM/OTPM limits, 429/529 (ex. 8)                 → do not multiply traffic with retries (ex. 9)
+     │ task queue (ex. 14) · cache/batching (ex. 15–16)      → deadline, cancellation (ex. 10)
      │
-  ruch mieszany: S od 1 s do 300 s → wariancja → head-of-line (ćw. 12) → osobne pule / kolejka zadań
-  mierzysz: trace (czekanie vs obsługa) · metryki RED/USE · profil tylko dla CPU/blokady
+  mixed traffic: S from 1 s to 300 s → variance → head-of-line (ex. 12) → separate pools / task queue
+  you measure: trace (waiting vs service) · RED/USE metrics · profile only for CPU/blocking
 ```
 
-Teraz przeczytaj `01a-teoria-kolejek-w-praktyce.md`, a potem zacznij od ćw. 1.
+Now read `01a-queueing-theory-in-practice.md`, and then start with exercise 1.
