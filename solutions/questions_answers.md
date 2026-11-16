@@ -77,48 +77,51 @@ inne w szczegółach — ważny jest kierunek i rząd wielkości.
    distribution can be uneven. Then requests wait for a slot in one process although the other has free ones.
    Measure the wait per process (`service_instance_id`) or leave headroom in the slots.
 
-## Ćw. 08 — limity dostawcy
-1. Dostawca rezerwuje OTPM według `max_tokens` w chwili przyjęcia żądania (nie zna długości odpowiedzi), więc
-   limiter po naszej stronie musi liczyć tak samo — inaczej wyśle za dużo i dostanie 429.
-2. Każdy proces myśli, że ma cały limit — razem wysyłają ~2× za dużo. Nagłówki `*-remaining` są wspólnym
-   stanem konta u dostawcy: korekta kubełka w dół do `remaining` synchronizuje procesy (z opóźnieniem jednej
-   odpowiedzi). Pełne rozwiązanie: wspólny limiter (np. w Redisie).
-3. 429 dotyczy konta, nie żądania: limit jest wyczerpany dla wszystkich. Jeśli pozostałe żądania wyślą dalej,
-   każde dostanie 429 (i będzie ponawiane) — rośnie ruch i opóźnienie odnowienia limitu.
+## Ex. 08 — provider limits
+1. The provider reserves OTPM according to `max_tokens` at the moment it accepts the request (it does not know
+   the length of the response), so the limiter on our side has to count the same way — otherwise it will send
+   too much and get a 429.
+2. Each process thinks it has the whole limit — together they send ~2× too much. The `*-remaining` headers are
+   the shared account state at the provider: correcting the bucket downward to `remaining` synchronizes the
+   processes (with a delay of one response). The full solution: a shared limiter (e.g. in Redis).
+3. A 429 concerns the account, not the request: the limit is exhausted for everyone. If the remaining requests
+   keep sending, each will get a 429 (and be retried) — traffic grows and the limit takes longer to renew.
 
-## Ćw. 09 — burza ponowień
-1. Nieudane żądania po naprawie kończą się szybko błędem zamiast „wygrać” trzecią czy dziewiątą próbą przy
-   przeciążonym dostawcy. Mniej sukcesów o 7%, ale ruch do dostawcy spadł z 3.65 do 1.20 próby/żądanie —
-   dostawca szybciej wychodzi z przeciążenia, a w realnym systemie inni klienci dostawcy też.
-2. ±10% wokół tego samego opóźnienia zostawia klientów zsynchronizowanych — wracają falą prawie w tej samej
-   chwili i znowu przeciążają. Pełny jitter rozkłada powroty równomiernie na całe okno.
-3. Za aplikacją: zna budżet ponowień, deadline (ćw. 10) i klasę żądania, ma metryki prób. Za SDK: poprawna
-   obsługa `retry-after` i idempotencji bez własnego kodu. Tu aplikacja — bo potrzebny jest budżet i brak
-   ponowień timeoutów; SDK `max_retries=0`.
+## Ex. 09 — retry storm
+1. After the fix, failed requests end quickly with an error instead of "winning" on the third or ninth attempt
+   against an overloaded provider. There are 7% fewer successes, but the traffic to the provider dropped from
+   3.65 to 1.20 attempts/request — the provider recovers from the overload faster, and in a real system so do
+   the provider's other customers.
+2. ±10% around the same delay leaves clients synchronized — they come back in a wave at almost the same moment
+   and overload it again. Full jitter spreads the returns evenly across the whole window.
+3. In the application: it knows the retry budget, the deadline (ex. 10) and the request class, and it has the
+   attempt metrics. In the SDK: correct handling of `retry-after` and idempotency without custom code. Here the
+   application — because we need a budget and no retrying of timeouts; the SDK gets `max_retries=0`.
 
-## Ćw. 10 — timeouty, deadline, anulowanie
-1. Timeout SDK jest per operacja (connect/read/write/pool), a read to czas ciszy między bajtami. Strumień,
-   który co kilka sekund przysyła token (albo `ping`), może trwać dowolnie długo — 330 s „read” nigdy nie
-   wygaśnie. Deadline to limit całkowity: `asyncio.timeout()` wokół całego wywołania.
-2. Read 15 s liczy się dopiero od wysłania żądania do dostawcy; wcześniej żądanie może czekać na slot
-   (semafor) i w limiterze tempa. Przy 2/s i 15 s trzymania slotu L ≈ 30 przy 32 slotach — gdy zawieszone
-   wywołania z wcześniejszych sekund jeszcze trzymają sloty (albo równolegle idzie inny ruch), część żądań
-   czeka na slot i dostaje 504 później. W moim powtórzeniu (sam ten ruch, 32 sloty) czekania nie było — wszystkie
-   504 po 15.0 s; dodatkowe sekundy pojawiają się, gdy L zbliża się do liczby slotów.
-3. W strumieniu SDK zgłasza surowy `httpx2.ReadTimeout`, nie `anthropic.APITimeoutError`. Lista wyjątków
-   ponawianych/klasyfikowanych musi go znać — inaczej trafi do ogólnego „błąd dostawcy” albo, co gorsza,
-   zostanie ponowiony przez ogólną regułę (`except Exception`), mnożąc wielominutowe generacje.
+## Ex. 10 — timeouts, deadlines, cancellation
+1. An SDK timeout is per operation (connect/read/write/pool), and read is the time of silence between bytes. A
+   stream that sends a token (or a `ping`) every few seconds can last arbitrarily long — a 330 s "read" never
+   expires. A deadline is a total limit: `asyncio.timeout()` around the whole call.
+2. The 15 s read counts only from the moment the request is sent to the provider; before that the request may
+   be waiting for a slot (the semaphore) and in the rate limiter. At 2/s and 15 s of slot holding, L ≈ 30 with
+   32 slots — when hung calls from earlier seconds still hold slots (or other traffic is running in parallel),
+   some requests wait for a slot and get their 504 later. In my repeat (just this traffic, 32 slots) there was
+   no waiting — all the 504s came after 15.0 s; the extra seconds appear when L approaches the number of slots.
+3. In a stream the SDK raises a raw `httpx2.ReadTimeout`, not `anthropic.APITimeoutError`. The list of retried
+   / classified exceptions has to know about it — otherwise it falls into the generic "provider error" or,
+   worse, gets retried by a catch-all rule (`except Exception`), multiplying multi-minute generations.
 
-## Ćw. 11 — fallback z wyłącznikiem
-1. 529 = dostawca przeciążony, ale działa. Fallback przerzuca na `b` ruch, który `b` też może przeciążyć,
-   a otwarcie wyłącznika odcina `a` w chwili, gdy zaraz wróci. Na 529 właściwa reakcja to backoff/limit
-   współbieżności (ćw. 08–09), nie zmiana dostawcy.
-2. Wszystkie żądania znów płaciłyby timeout `a`, jeśli `a` nadal leży, a gdy dopiero wstaje — dostałby od
-   razu pełny ruch i padł ponownie (wyłącznik oscyluje). Jedna próbka to tani test.
-3. `PoolTimeout` (pula < semafor) wygląda jak awaria `a` (`APITimeoutError`). Bez wyłącznika: każde żądanie
-   czeka pool timeout i po cichu idzie do `b`. Z wyłącznikiem: po 5 takich „awariach” `a` zostaje odcięty na
-   30 s — cały ruch na `b`, choć `a` jest zdrowy. Wniosek: najpierw usuń przyczynę (pula), a wyłącznik licz
-   tylko na błędach dostawcy, nie na własnych limitach.
+## Ex. 11 — fallback with a circuit breaker
+1. 529 = the provider is overloaded, but working. A fallback moves traffic to `b` that `b` may overload too,
+   and opening the breaker cuts off `a` just as it is about to recover. The right reaction to a 529 is backoff
+   / a concurrency limit (ex. 08–09), not switching providers.
+2. All requests would pay `a`'s timeout again if `a` is still down, and if it is just getting back up — it
+   would immediately receive the full traffic and fall over again (the breaker oscillates). A single probe is
+   a cheap test.
+3. A `PoolTimeout` (pool < semaphore) looks like a failure of `a` (`APITimeoutError`). Without a breaker: every
+   request waits for the pool timeout and quietly goes to `b`. With a breaker: after 5 such "failures" `a` is
+   cut off for 30 s — all traffic goes to `b`, although `a` is healthy. Takeaway: first remove the cause (the
+   pool), and have the breaker count only provider errors, not your own limits.
 
 ## Ćw. 12 — backpressure i odrzucanie
 1. Po 5 minutach klient zwykle już zrezygnował — 200 trafia „do nikogo”, a slot i generacja dostawcy zostały
@@ -209,14 +212,16 @@ inne w szczegółach — ważny jest kierunek i rząd wielkości.
   thread.
 - **Fix:** `async def` + an async client (ex. 05); `check.py ex05` PASS.
 
-### Mini-III (po bloku III) — „dostawca: przeciążacie nas”
-- **Objaw:** dostawca widzi ~3× więcej żądań niż użytkowników, falami; część odpowiedzi 502 (u mnie 24/201).
-- **Ślad:** `/diag` → 625 prób HTTP na 201 żądań (×3.11); u atrapy 448 × 529 przy 177 × 200; `/diag` →
-  `klienci.krotkie.max_retries` = 2 (SDK ponawia) plus ponowienia aplikacji bez jittera (wyrównane fale);
-  `check.py ex09`: ×2.40.
-- **Przyczyna:** dwie warstwy ponowień (SDK × aplikacja) bez budżetu i jittera przy przeciążonym dostawcy.
-- **Naprawa:** jedna warstwa (SDK `max_retries=0`), pełny jitter, `retry-after`, budżet 20% (ćw. 09);
-  `check.py ex09` PASS (u mnie ×1.20).
+### Mini-III (after Block III) — "the provider: you are overloading us"
+- **Symptom:** the provider sees ~3× more requests than there are users, in waves; some responses are 502 (in
+  my run 24/201).
+- **Evidence:** `/diag` → 625 HTTP attempts for 201 requests (×3.11); at the mock 448 × 529 against 177 × 200;
+  `/diag` → `clients.short.max_retries` = 2 (the SDK retries) plus application retries without jitter
+  (aligned waves); `check.py ex09`: ×2.40.
+- **Cause:** two layers of retries (SDK × application) with no budget and no jitter against an overloaded
+  provider.
+- **Fix:** a single layer (SDK `max_retries=0`), full jitter, `retry-after`, a 20% budget (ex. 09);
+  `check.py ex09` PASS (in my run ×1.20).
 
 ### Mini-IV (po bloku IV) — „streszczenia wolne, kiedy działa dział analiz”
 - **Objaw:** gdy w tle trwa 40 analiz po 60 s, streszczenie dostaje 503 po ~5 s (u mnie: 503 po 5.0 s).
