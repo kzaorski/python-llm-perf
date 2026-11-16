@@ -49,7 +49,8 @@ connection pool** is smaller — the wait moves to where your measurement cannot
    histogram_quantile(0.99, sum by (le) (rate(llm_queue_wait_seconds_bucket{request_class="short"}[2m])))
    ```
    The slots are saturated (4), the queue is hundreds of requests long, and a provider with capacity 64
-   generates 4 at a time.
+   generates 4 at a time. (If ex. 5's wave of 60 letters ran less than 2 minutes ago, the `[2m]` window of
+   `mock_llm_generating` still contains it — narrow the window to the test time, for example `[40s]`.)
 5. Open **`app/llm/limiter.py`**: `SLOTS = int(os.environ.get("LLM_SLOTS", "4"))`. Set the default value
    from your calculation (L = λ·W + headroom for the tail; I took 32) and note in a comment where it came
    from.

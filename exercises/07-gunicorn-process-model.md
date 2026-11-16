@@ -118,7 +118,8 @@ normally during that time.
    curl -s -o /dev/null -w 'ping: %{time_total}\n' 127.0.0.1:8060/diag/ping
    ```
    In my run: 60 × 200; fastest 2.27 s, median 2.45 s, slowest 4.54 s — two groups (~2.3 s and ~4.4 s);
-   ping during the wave 1.3 ms. `check.py ex05`: "20 of 60 requests waited for the second wave (min 2.16 s,
+   ping during the wave 1.3 ms. The very first wave after the incident starts can be slower (client
+   warm-up: 4.0 s and 6.1 s in my repeat) — repeat the command and read the second wave. `check.py ex05`: "20 of 60 requests waited for the second wave (min 2.16 s,
    max 4.36 s)".
 3. Answer without looking at the code: how many requests were in the first wave? Is the event loop stuck
    (ping)? Is it the LLM semaphore (`/diag` → `queue`)? Which resource has exactly that limit?

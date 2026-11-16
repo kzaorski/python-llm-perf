@@ -70,7 +70,9 @@ side. You will also see what the limiter does NOT fix: throughput.
    `503 provider_rate_limited`, p99 6.7 s → **0 × 429**, 180/180 OK, but slot wait p99 **58.2 s** — the
    excess waits on our side.
 7. Reset the mock: `curl -s -X POST 127.0.0.1:8061/admin/reset` and run `python check.py ex08`
-   (check sets the `limits` profile itself and sends 90 requests at once).
+   (check sets the `limits` profile itself and sends 90 requests at once). If it fails right after your own
+   k6 run with "the app limiter remembers the exhausted limit … wait a minute", the application's limiter
+   still holds the used-up bucket: wait about a minute (or restart the application) and run it again.
 
 ## Definition of done
 - [ ] With the `limits` profile the mock does not return 429 (≤ 1%), and all requests end with 200.
