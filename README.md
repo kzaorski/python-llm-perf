@@ -1,5 +1,8 @@
 # Kurs python-llm-perf — aplikacja Pythona z LLM pod obciążeniem
 
+> 🇬🇧 **English version:** pełne tłumaczenie kursu na angielski (tekst, kod, dane) jest na gałęzi [`english`](https://github.com/kzaorski/python-llm-perf/tree/english).
+> Ćwiczenia, wady i zmierzone liczby są takie same jak w wersji polskiej.
+
 Praktyczny kurs „learn-by-doing” o wydajności aplikacji, które większość czasu **czekają**: na odpowiedź
 modelu językowego, na slot, na limit dostawcy, w kolejce. Pracujesz na asystencie biura obsługi zgłoszeń
 szkodowych (FastAPI + asyncio + SDK Anthropic), obciążasz go k6 i obserwujesz w Grafanie (Tempo, Prometheus,
