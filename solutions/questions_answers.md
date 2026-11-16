@@ -36,43 +36,46 @@ inne w szczegółach — ważny jest kierunek i rząd wielkości.
    parallel connections, memory for in-flight responses and — above all — concurrency at the provider, whose
    limit (capacity, ITPM/OTPM) may be lower than your slots.
 
-## Ćw. 04 — synchroniczny klient w `async def`
-1. Wąskim gardłem nie jest semafor, tylko pętla zdarzeń: blokujące wywołanie zatrzymuje cały proces, więc
-   naraz trwa najwyżej jedno wywołanie niezależnie od liczby slotów.
-2. Wszystkie endpointy dzielą jedną pętlę zdarzeń. Gdy stoi (blokujący odczyt z gniazda w handlerze
-   klasyfikacji), żadna inna korutyna — streszczenie, `/health`, `/diag/ping` — nie dostaje czasu.
-3. Proces obsługuje ~1 wywołanie/s, więc ~6–8 procesów (z zapasem na ogon). Zła naprawa: każdy proces to
-   osobna pamięć, osobny klient i limity, a mechanizm (proces = 1 żądanie) zostaje — przy wywołaniach
-   minutowych potrzebowałbyś setek procesów.
+## Ex. 04 — a synchronous client in `async def`
+1. The bottleneck is not the semaphore but the event loop: a blocking call stops the whole process, so at
+   most one call is in flight at a time regardless of the number of slots.
+2. All endpoints share one event loop. When it stands still (a blocking socket read in the classification
+   handler), no other coroutine — summary, `/health`, `/diag/ping` — gets any time.
+3. A process serves ~1 call/s, so ~6–8 processes (with headroom for the tail). Why it is a bad fix: every
+   process has its own memory, its own client and limits, and the mechanism (process = 1 request) stays — with
+   minute-long calls you would need hundreds of processes.
 
-## Ćw. 05 — pula wątków anyio
-1. Handlery `def` FastAPI wykonuje w puli wątków anyio, której domyślny limiter ma 40 miejsc
-   (`anyio.to_thread.current_default_thread_limiter().total_tokens`). 41. żądanie czeka na wolny wątek.
-2. Każdy wątek to pamięć stosu i przełączanie przez system; przy 400 wątkach i wywołaniach minutowych dalej
-   rośnie zużycie zasobów, a limit tylko się przesuwa (przy 401 równoległych objaw wraca). Do tego wątki nie
-   podlegają semaforowi/limiterowi aplikacji, jeśli wołają klienta synchronicznego bezpośrednio.
-3. Ćw. 4: pętla stoi — `/diag/ping` trwa sekundy, wszystkie endpointy cierpią. Ćw. 5: pętla wolna — ping w
-   milisekundach (u mnie 1.3 ms w trakcie fali), cierpi tylko endpoint `def` i tylko powyżej 40 równoległych.
+## Ex. 05 — the anyio thread pool
+1. FastAPI runs `def` handlers in the anyio thread pool, whose default limiter has 40 slots
+   (`anyio.to_thread.current_default_thread_limiter().total_tokens`). The 41st request waits for a free thread.
+2. Every thread costs stack memory and OS context switching; with 400 threads and minute-long calls resource
+   use keeps growing, and the limit only moves (at 401 parallel requests the symptom returns). On top of that,
+   the threads are not subject to the application's semaphore/limiter if they call the synchronous client
+   directly.
+3. Ex. 4: the loop stands still — `/diag/ping` takes seconds, all endpoints suffer. Ex. 5: the loop is free —
+   ping in milliseconds (in my run 1.3 ms during the wave), only the `def` endpoint suffers, and only above
+   40 parallel requests.
 
-## Ćw. 06 — pula slotów i połączeń
-1. Przy 2/s potrzeba ~2–3 slotów; 32 to tylko liczba dopuszczalna, a nie zajęta — semafor nie kosztuje nic, gdy
-   jest wolny. Przy 320 slotach tracisz ochronę: w szczycie wyślesz dostawcy więcej, niż ma mocy/limitu
-   (429/529, ćw. 08–09), a kolejka przeniesie się z Twojego semafora (widoczna) do dostawcy (niewidoczna).
-2. Z `pool=600` czekanie na połączenie jest ciche (nie trafia do `llm.queue_wait`), żądanie po prostu trwa
-   dłużej. Z `pool=5` przeciążenie puli daje szybki, nazwany błąd (`PoolTimeout` → `APITimeoutError`) —
-   widać przyczynę, a nie tylko ogon.
-3. 4 × 32 = 128 równoległych przy mocy 64: połowa czeka w kolejce dostawcy albo dostaje 529 — sloty trzeba
-   dzielić per proces (np. 16 na proces) albo mieć wspólny limiter (Redis, ćw. 08).
+## Ex. 06 — slot and connection pools
+1. At 2/s you need ~2–3 slots; 32 is only the permitted number, not the occupied one — a semaphore costs
+   nothing when it is free. With 320 slots you lose the protection: at peak you will send the provider more
+   than its capacity/limit (429/529, ex. 08–09), and the queue will move from your semaphore (visible) to the
+   provider (invisible).
+2. With `pool=600` the wait for a connection is silent (it does not go into `llm.queue_wait`), the request
+   simply takes longer. With `pool=5` pool overload produces a fast, named error (`PoolTimeout` →
+   `APITimeoutError`) — you see the cause, not just the tail.
+3. 4 × 32 = 128 parallel calls at capacity 64: half wait in the provider's queue or get a 529 — slots must be
+   divided per process (for example 16 per process) or you need a shared limiter (Redis, ex. 08).
 
-## Ćw. 07 — gunicorn
-1. Workery sync były zajęte, backlog gniazda nasłuchującego się zapełnił, a jądro odrzuciło lub zerwało
-   połączenia, zanim aplikacja w ogóle zobaczyła żądania (u mnie 63/450 zerwanych). Aplikacja nie mogła
-   odpowiedzieć 503, bo nie miała czym przyjąć żądania.
-2. Naprawiasz zabijanie workera przy długim wywołaniu (500 + `WORKER TIMEOUT`). Nadal przepustowość = liczba
-   procesów / czas wywołania, a jedno 600-sekundowe wywołanie blokuje cały proces na 10 minut.
-3. Nie: gniazdo dzieli jądro, a proces, który pierwszy wywoła `accept`, bierze żądanie — rozkład bywa nierówny.
-   Wtedy w jednym procesie czekają żądania na slot, choć drugi ma wolne. Czekanie mierz per proces
-   (`service_instance_id`) albo daj zapas slotów.
+## Ex. 07 — gunicorn
+1. The sync workers were busy, the listening socket's backlog filled up, and the kernel rejected or dropped
+   connections before the application ever saw the requests (in my run 63/450 dropped). The application could
+   not answer 503 because it had nothing to accept the request with.
+2. You fix the worker being killed on a long call (500 + `WORKER TIMEOUT`). Throughput is still the number of
+   processes / call time, and a single 600-second call blocks an entire process for 10 minutes.
+3. No: the socket is shared by the kernel, and whichever process calls `accept` first takes the request — the
+   distribution can be uneven. Then requests wait for a slot in one process although the other has free ones.
+   Measure the wait per process (`service_instance_id`) or leave headroom in the slots.
 
 ## Ćw. 08 — limity dostawcy
 1. Dostawca rezerwuje OTPM według `max_tokens` w chwili przyjęcia żądania (nie zna długości odpowiedzi), więc
@@ -198,12 +201,13 @@ inne w szczegółach — ważny jest kierunek i rząd wielkości.
 - **Cause:** 4 slots — capacity ~3.8/s. The closed model adjusted itself to the capacity (coordinated omission).
 - **Fix:** slots from Little's law (4/s × 1.05 s ≈ 4.2 → 8 with headroom; for 20/s → 32) + reports from the open model.
 
-### Mini-II (po bloku II) — „pisma raz 2 s, raz 4 s”
-- **Objaw:** 60 równoczesnych pism: dwie grupy czasów (~2.3 s i ~4.4 s), nic pomiędzy.
-- **Ślad:** `/diag/ping` w trakcie 1.3 ms (pętla wolna), `/diag` → `kolejka` pusta (to nie semafor LLM), CPU
-  procesu bliskie 0; 40 odpowiedzi w pierwszej fali.
-- **Przyczyna:** endpoint pism to handler `def` → pula wątków anyio (40); 20 żądań czeka na wolny wątek.
-- **Naprawa:** `async def` + asynchroniczny klient (ćw. 05); `check.py ex05` PASS.
+### Mini-II (after Block II) — "letters take 2 s one time, 4 s the next"
+- **Symptom:** 60 simultaneous letters: two groups of times (~2.3 s and ~4.4 s), nothing in between.
+- **Evidence:** `/diag/ping` during the wave 1.3 ms (the loop is free), `/diag` → `queue` empty (it is not the
+  LLM semaphore), process CPU close to 0; 40 responses in the first wave.
+- **Cause:** the letter endpoint is a `def` handler → the anyio thread pool (40); 20 requests wait for a free
+  thread.
+- **Fix:** `async def` + an async client (ex. 05); `check.py ex05` PASS.
 
 ### Mini-III (po bloku III) — „dostawca: przeciążacie nas”
 - **Objaw:** dostawca widzi ~3× więcej żądań niż użytkowników, falami; część odpowiedzi 502 (u mnie 24/201).
