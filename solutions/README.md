@@ -5,7 +5,7 @@ changes to that module). Copying it unblocks you at that stage — it is the las
 hints in `solutions/hints/`.
 
 ```bash
-cp solutions/ex06_limiter.py app/llm/limiter.py      # the module's state after ex. 06 (includes ex. 01)
+cp solutions/ex06_limiter.py app/llm/limiter.py      # the module's state after ex. 6 (includes ex. 1)
 ```
 
 | File | Copy to | Ex. | Flaw |
@@ -52,7 +52,7 @@ Hints exist for all 18 exercises (also 03 and 17, which do not change code, and 
 
 ## Other files
 
-- `questions_answers.md` — the key to the review questions of ex. 01–18 and to mini-incidents I–IV; look at it
+- `questions_answers.md` — the key to the review questions of ex. 1–18 and to mini-incidents I–IV; look at it
   AFTER you have tried to answer yourself.
 - `ex18_answers.md` — the key to the final (symptom → evidence → cause → fix for every defect, interactions,
   exclusions) + the self-assessment rubric. Open it only AFTER you have written your own report.

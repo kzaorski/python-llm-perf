@@ -97,5 +97,5 @@ Add `LLM_CONNECTIONS` to `/diag` (the `clients` section) and a Grafana panel "ca
 pool". What alert would you set to catch the variant from step 7 before customers see it?
 
 ---
-Stuck? `solutions/hints/ex06_hint1.md` → `hint2` → `hint3`. Ready-made solution:
+Stuck? `solutions/hints/ex06_hint1.md` → `hint2` → `hint3`. The ready-made solution:
 `solutions/ex06_limiter.py` → `app/llm/limiter.py` (it also contains ex. 1).

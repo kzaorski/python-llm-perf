@@ -69,5 +69,5 @@ Send 60 letters and, in parallel, 20 classifications (already async after ex. 4)
 wait for the letters? Why not? And what would happen if both the letters and the classifications were `def`?
 
 ---
-Stuck? `solutions/hints/ex05_hint1.md` → `hint2` → `hint3`. Ready-made solution:
+Stuck? `solutions/hints/ex05_hint1.md` → `hint2` → `hint3`. The ready-made solution:
 `solutions/ex05_templates.py` → `app/templates.py`.

@@ -84,5 +84,5 @@ The `unstable` profile (random 529/500 and mid-stream errors) at a traffic of 2/
 block sensible retries at low traffic? How do you choose the minimum budget (`max(1, 20%)` in the solution)?
 
 ---
-Stuck? `solutions/hints/ex09_hint1.md` → `hint2` → `hint3`. A ready solution:
+Stuck? `solutions/hints/ex09_hint1.md` → `hint2` → `hint3`. The ready-made solution:
 `solutions/ex09_retries.py` → `app/llm/retries.py` and `solutions/ex09_client.py` → `app/llm/client.py`.

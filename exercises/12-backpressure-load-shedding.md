@@ -11,8 +11,7 @@ run realistic mixed traffic in the open model for 3 minutes and watch what happe
 AFTER the inflow ends: short requests wait minutes behind long ones (head-of-line blocking in a shared
 pool), the queue of long requests grows without a limit, clients give up, and the provider keeps
 generating responses nobody is waiting for. You fix this with three mechanisms: separate pools per
-class, a queue limit, and a wait
-budget (a fast 503 with `Retry-After`).
+class, a queue limit, and a wait budget (a fast 503 with `Retry-After`).
 
 ## Theory in a nutshell
 - **Head-of-line blocking** — a shared queue/pool for tasks with wildly different service times: a few
@@ -112,6 +111,6 @@ other way around. Measure run B with this change — what happens to the drain?
 
 ---
 
-Stuck? `solutions/hints/ex12_hint1.md` → `hint2` → `hint3`. The ready solution:
+Stuck? `solutions/hints/ex12_hint1.md` → `hint2` → `hint3`. The ready-made solution:
 `solutions/ex12_limiter.py` → `app/llm/limiter.py` (includes ex. 1, 6, 8) and
 `solutions/ex12_overload.py` → `app/overload.py`.

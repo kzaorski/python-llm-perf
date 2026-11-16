@@ -1,4 +1,4 @@
-# Answers to the review questions (ex. 01–18) and mini-incidents I–IV
+# Answers to the review questions (ex. 1–18) and mini-incidents I–IV
 
 The numbers in the answers come from the author's measurements (the same commands as in the exercises). Yours
 will differ in the details — what matters is the direction and the order of magnitude.
@@ -59,13 +59,13 @@ will differ in the details — what matters is the direction and the order of ma
 ## Ex. 06 — slot and connection pools
 1. At 2/s you need ~2–3 slots; 32 is only the permitted number, not the occupied one — a semaphore costs
    nothing when it is free. With 320 slots you lose the protection: at peak you will send the provider more
-   than its capacity/limit (429/529, ex. 08–09), and the queue will move from your semaphore (visible) to the
+   than its capacity/limit (429/529, ex. 8–9), and the queue will move from your semaphore (visible) to the
    provider (invisible).
 2. With `pool=600` the wait for a connection is silent (it does not go into `llm.queue_wait`), the request
    simply takes longer. With `pool=5` pool overload produces a fast, named error (`PoolTimeout` →
    `APITimeoutError`) — you see the cause, not just the tail.
 3. 4 × 32 = 128 parallel calls at capacity 64: half wait in the provider's queue or get a 529 — slots must be
-   divided per process (for example 16 per process) or you need a shared limiter (Redis, ex. 08).
+   divided per process (for example 16 per process) or you need a shared limiter (Redis, ex. 8).
 
 ## Ex. 07 — gunicorn
 1. The sync workers were busy, the listening socket's backlog filled up, and the kernel rejected or dropped
@@ -114,7 +114,7 @@ will differ in the details — what matters is the direction and the order of ma
 ## Ex. 11 — fallback with a circuit breaker
 1. 529 = the provider is overloaded, but working. A fallback moves traffic to `b` that `b` may overload too,
    and opening the breaker cuts off `a` just as it is about to recover. The right reaction to a 529 is backoff
-   / a concurrency limit (ex. 08–09), not switching providers.
+   / a concurrency limit (ex. 8–9), not switching providers.
 2. All requests would pay `a`'s timeout again if `a` is still down, and if it is just getting back up — it
    would immediately receive the full traffic and fall over again (the breaker oscillates). A single probe is
    a cheap test.
@@ -124,7 +124,7 @@ will differ in the details — what matters is the direction and the order of ma
    pool), and have the breaker count only provider errors, not your own limits.
 
 ## Ex. 12 — backpressure and load shedding
-1. After 5 minutes the client has usually given up already — the 200 goes "to nobody", and the slot and the
+1. After 5 minutes the client has usually given up already — the 200 goes to a client who has already left, and the slot and the
    provider's generation are wasted (run C: 30 abandoned generations). A fast 503 with `Retry-After` lets the
    client retry later or switch to another channel, and lets the system serve the ones it can still serve in time.
 2. Budget ≤ the client's patience minus the service time: if the client (a browser, a proxy, another service)
@@ -214,7 +214,7 @@ will differ in the details — what matters is the direction and the order of ma
   LLM semaphore), process CPU close to 0; 40 responses in the first wave.
 - **Cause:** the letter endpoint is a `def` handler → the anyio thread pool (40); 20 requests wait for a free
   thread.
-- **Fix:** `async def` + an async client (ex. 05); `check.py ex05` PASS.
+- **Fix:** `async def` + an async client (ex. 5); `check.py ex05` PASS.
 
 ### Mini-III (after Block III) — "the provider: you are overloading us"
 - **Symptom:** the provider sees ~3× more requests than there are users, in waves; some responses are 502 (in
@@ -224,7 +224,7 @@ will differ in the details — what matters is the direction and the order of ma
   (aligned waves); `check.py ex09`: ×2.40.
 - **Cause:** two layers of retries (SDK × application) with no budget and no jitter against an overloaded
   provider.
-- **Fix:** a single layer (SDK `max_retries=0`), full jitter, `retry-after`, a 20% budget (ex. 09);
+- **Fix:** a single layer (SDK `max_retries=0`), full jitter, `retry-after`, a 20% budget (ex. 9);
   `check.py ex09` PASS (in my run ×1.20).
 
 ### Mini-IV (after Block IV) — "summaries are slow while the analysis team is running"

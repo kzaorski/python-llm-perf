@@ -90,5 +90,5 @@ Add a third bucket: input tokens/min (ITPM), with the number of tokens estimated
 Build traffic in which ITPM is the bottleneck (long claims, small `max_tokens`).
 
 ---
-Stuck? `solutions/hints/ex08_hint1.md` → `hint2` → `hint3`. A ready solution:
+Stuck? `solutions/hints/ex08_hint1.md` → `hint2` → `hint3`. The ready-made solution:
 `solutions/ex08_limiter.py` → `app/llm/limiter.py` (includes ex. 1 and 6).

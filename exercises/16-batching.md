@@ -67,5 +67,5 @@ only while a call is in progress (a batch "from whatever accumulated in the mean
 fixed-window version.
 
 ---
-Stuck? `solutions/hints/ex16_hint1.md` → `hint2` → `hint3`. The ready solution:
+Stuck? `solutions/hints/ex16_hint1.md` → `hint2` → `hint3`. The ready-made solution:
 `solutions/ex16_batch.py` → `app/batch.py`.

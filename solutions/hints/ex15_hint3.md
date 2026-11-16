@@ -6,7 +6,7 @@ if v: return v, "hit"
 if k in _inflight: return await asyncio.shield(_inflight[k]), "shared"
 fut = loop.create_future(); _inflight[k] = fut
 try:
-    if await r.set(k + ":lock", "1", nx=True, px=LOCK_MS):
+    if await r.set(k + ":lock", "1", nx=True, px=LOCK_S * 1000):
         try: v = await compute(q, request); await r.set(k, v, ex=TTL_S)
         finally: await r.delete(k + ":lock")
     else:

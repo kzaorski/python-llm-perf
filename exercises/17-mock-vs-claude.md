@@ -11,7 +11,7 @@
 The whole course stands on a mock: repeatable, with controlled limits and delays. Conclusions about capacity
 (how many slots, what wait budget, what timeouts) are worth only as much as the mock's agreement with reality.
 You measure the same set of tasks on the mock and on the real API, compare the distribution of TTFT, total time,
-token rate and the limit headers — and check whether the numbers from ex. 03 and 06 need recalculating.
+token rate and the limit headers — and check whether the numbers from ex. 3 and 6 need recalculating.
 
 ## Theory in a nutshell
 - **Capacity model** — you take W (service time) in L = λ·W from a measurement. For an LLM W ≈ TTFT + output_tokens /
@@ -20,7 +20,7 @@ token rate and the limit headers — and check whether the numbers from ex. 03 a
   during the day and account limits. Why compare: to know which conclusions of the course carry over 1:1 (the mechanisms:
   queues, slots, timeouts) and which need calibration (the numbers).
 - **The `anthropic-ratelimit-*` headers** — `requests`, `input-tokens`, `output-tokens`, `tokens` × `limit`,
-  `remaining`, `reset`. The mock exposes the same names (ex. 08), so the limiter works the same way; the values depend on the account.
+  `remaining`, `reset`. The mock exposes the same names (ex. 8), so the limiter works the same way; the values depend on the account.
 - The trap: a sequential comparison measures W, not behavior under load — you do not test that on the real API (cost,
   account limits, impact on other users).
 
@@ -55,7 +55,7 @@ token rate and the limit headers — and check whether the numbers from ex. 03 a
 4. Compare the limit headers (`headers` in both JSON sections). In my run the account: RPM 13,000, ITPM 10 M, OTPM 2 M —
    a 429 on the real API at the course's traffic is practically unreachable; that is why you practice the limits on the mock
    (the `limits` profile: RPM 120, ITPM 60,000, OTPM 12,000).
-5. **Calibration:** use Little's law to recalculate the number of slots from ex. 06 for your measured W (summary, p50 and p90)
+5. **Calibration:** use Little's law to recalculate the number of slots from ex. 6 for your measured W (summary, p50 and p90)
    at a traffic of 20/s. Are 32 slots enough? And for a reply of 700 tokens?
 6. `python check.py ex17` — without a key and without a `claude` section in the result: SKIP (the optional part); with a `claude` section: PASS.
 
@@ -73,7 +73,7 @@ Answers: `solutions/questions_answers.md`.
 
 ## ★ Bonus (optional)
 Set the mock to imitate your measurement (`PATCH /admin/config?provider=a` with `ttft_median_ms`, `ttft_sigma`,
-`tokens_per_s`) and repeat ex. 03 (the ramp). Has the knee of the curve moved as Little's law predicts?
+`tokens_per_s`) and repeat ex. 3 (the ramp). Has the knee of the curve moved as Little's law predicts?
 
 ---
 Stuck? `solutions/hints/ex17_hint1.md` → `hint2` → `hint3`. There is no code to copy in this exercise.

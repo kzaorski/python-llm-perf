@@ -103,5 +103,5 @@ Instead of rewriting to `async`, wrap the synchronous call in `await asyncio.to_
 traffic at 6/s and 60/s. What limits throughput in this variant? (Hint: ex. 5.)
 
 ---
-Stuck? `solutions/hints/ex04_hint1.md` → `hint2` → `hint3`. Ready-made solution:
+Stuck? `solutions/hints/ex04_hint1.md` → `hint2` → `hint3`. The ready-made solution:
 `solutions/ex04_classification.py` → `app/classification.py`.

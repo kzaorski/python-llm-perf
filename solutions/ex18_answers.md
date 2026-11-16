@@ -13,7 +13,7 @@ and on the reference state (`./incident.sh start custom 17`), signals from Prome
 
 ## Defects — symptom → evidence → cause → fix
 
-### 1. Too few LLM slots (configuration `LLM_SLOTS=4`) — ex. 06
+### 1. Too few LLM slots (configuration `LLM_SLOTS=4`) — ex. 6
 - **Symptom:** summaries are slow or return 503 after ~5 s; on the client side (k6) 1406 × 503 next to 1619 × 200.
 - **Evidence:** `max(llm_inflight{request_class="short"})` = **4** (reference: 17); slot wait p50 **3.99 s** (cut
   off by the 5 s wait budget; reference 0.003 s); `sum by (outcome) (increase(app_requests_total{endpoint="summary"}[5m]))`
@@ -23,7 +23,7 @@ and on the reference state (`./incident.sh start custom 17`), signals from Prome
   `llm.queue_wait` next to a short `llm.call` (`{span.llm.queue.wait_ms > 100.0}`).
 - **Cause:** L = λ·W = 8/s × ~1 s ≈ 8 + FAQ + stream ≫ 4 slots. The rejections are the correct reaction of a bounded
   queue (ex. 12) to a lack of capacity — not a backpressure defect.
-- **Fix:** slots from Little's law (32 for short, ex. 06) — remove the `LLM_SLOTS` override. Proof: the
+- **Fix:** slots from Little's law (32 for short, ex. 6) — remove the `LLM_SLOTS` override. Proof: the
   `check.py ex06` probe.
 - **Diagnostic pitfall:** the 503s tempt you to "raise the queue limit". What tells them apart is `llm_inflight`
   stuck at 4 while the provider has spare capacity (with correct slots the 503s would appear only when

@@ -110,5 +110,5 @@ the next — always when the analysis team submits a series of claim file analys
 Answer: `solutions/questions_answers.md`, the "Mini-incidents" section.
 
 ---
-Stuck? `solutions/hints/ex13_hint1.md` → `hint2` → `hint3`. The ready solution:
+Stuck? `solutions/hints/ex13_hint1.md` → `hint2` → `hint3`. The ready-made solution:
 `solutions/ex13_stream.py` → `app/stream.py`.

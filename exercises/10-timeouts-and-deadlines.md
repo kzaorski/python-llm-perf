@@ -145,5 +145,5 @@ The `pauses` profile (`curl -X POST 127.0.0.1:8061/admin/profile/pauses`): a 20 
 the stream. At what `read` does the call survive the pause without pings? What would happen with `read=15`?
 
 ---
-Stuck? `solutions/hints/ex10_hint1.md` → `hint2` → `hint3`. A ready solution:
+Stuck? `solutions/hints/ex10_hint1.md` → `hint2` → `hint3`. The ready-made solution:
 `solutions/ex10_client.py` → `app/llm/client.py` (includes ex. 9) and `solutions/ex10_call.py` → `app/llm/call.py`.

@@ -68,5 +68,5 @@ Add refresh-ahead (stale-while-revalidate): for the last 10% of the TTL return t
 in the background. How does this change the `rate(llm_call_duration_seconds_count[1m])` chart under constant FAQ traffic?
 
 ---
-Stuck? `solutions/hints/ex15_hint1.md` → `hint2` → `hint3`. The ready solution:
+Stuck? `solutions/hints/ex15_hint1.md` → `hint2` → `hint3`. The ready-made solution:
 `solutions/ex15_cache.py` → `app/cache.py`.

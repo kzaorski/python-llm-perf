@@ -15,7 +15,7 @@ defaults.
 ## Theory in a nutshell
 - **Task queue** (taskiq + Redis Streams) — the application writes a job to the stream (`POST
   /claims/{n}/summary/async` → `{"task": id}`), a worker picks it up and runs it, the result sits in Redis
-  (`GET /jobs/{id}` → `pending_or_running` | `done` | `error`). Intuition: the semaphore from ex. 06, only durable and
+  (`GET /jobs/{id}` → `pending_or_running` | `done` | `error`). Intuition: the semaphore from ex. 6, only durable and
   shared across processes. (→ `14a`)
 - **Queue length ≠ `XLEN`** — taskiq does not delete processed entries from the stream, so `XLEN` grows with every
   job. The queue is described by the consumer group: `lag` (not yet delivered), `pending` (delivered, unacknowledged)
@@ -104,5 +104,5 @@ with run B from ex. 12: instead of 42 rejections with a 503 you have a queue —
 and when does that stop being acceptable?
 
 ---
-Stuck? `solutions/hints/ex14_hint1.md` → `hint2` → `hint3`. The ready solution:
+Stuck? `solutions/hints/ex14_hint1.md` → `hint2` → `hint3`. The ready-made solution:
 `solutions/ex14_queue_metrics.py` → `app/queue_metrics.py` and `solutions/ex14_tasks.py` → `app/tasks.py`.

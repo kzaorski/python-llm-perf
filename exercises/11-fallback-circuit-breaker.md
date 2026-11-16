@@ -108,5 +108,5 @@ you have users, and in waves. Your traffic is ~10 summaries/s.
 Answer: `solutions/questions_answers.md`, the "Mini-incidents" section.
 
 ---
-Stuck? `solutions/hints/ex11_hint1.md` → `hint2` → `hint3`. A ready solution:
+Stuck? `solutions/hints/ex11_hint1.md` → `hint2` → `hint3`. The ready-made solution:
 `solutions/ex11_fallback.py` → `app/llm/fallback.py`.

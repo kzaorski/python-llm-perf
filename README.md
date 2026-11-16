@@ -12,7 +12,7 @@ measuring and fixing them is the content of the 18 exercises.
 > images `grafana/otel-lgtm:0.39.0`, `grafana/k6:2.3.0`, `redis:8.8.4-alpine`, mock LLM 1.1 (`python:3.13.18-slim-trixie`).
 > Smoke test from scratch (2026-11-01, fresh clone, Docker Desktop on macOS, arm64): a fresh install on Python
 > **3.11.17** (the lowest supported) and 3.13.13; the first `docker compose up -d --wait` on empty volumes ~10 s
-> (images cached, no pulling), `pip install` + data ~20 s; ex. 01 and 12 (the 180 s runs A and B) executed
+> (images cached, no pulling), `pip install` + data ~20 s; ex. 1 and 12 (the 180 s runs A and B) executed
 > literally — numbers match the tables; `check.py --all` on the skeleton: 17 × FAIL + SKIP ex17 (no exceptions,
 > ~11 min); `./smoke.sh` on the solutions: 17 × PASS + SKIP ex17 (no key), ~7 min.
 
@@ -76,7 +76,7 @@ rebuilding an image. k6 reaches the host through `host.docker.internal`.
 | What | Command |
 |---|---|
 | application (the skeleton with flaws) | `uvicorn app.main:app --port 8060` |
-| gunicorn variant (ex. 07) | `gunicorn -c gunicorn.conf.py` (:8062) |
+| gunicorn variant (ex. 7) | `gunicorn -c gunicorn.conf.py` (:8062) |
 | queue worker + metrics (ex. 14) | `taskiq worker app.tasks:broker --workers 2 --max-async-tasks 4` and `python -m app.queue_metrics` (:8063) |
 | k6 traffic | `docker compose run --rm k6 run -o experimental-prometheus-rw /scripts/<file>.js -e VARIABLE=…` → summary in `results/` |
 | run with backlog sampling | `python scripts/measure.py <name> --inflow-s 180 -- run …` → `results/<name>-run.json` (backlog at the end of the inflow, drain) |
@@ -104,7 +104,7 @@ ready-made versions in `solutions/` (see `solutions/README.md`).
 | `glossary.md` | the glossary with links to the exercises |
 | `solutions/` | cumulative solutions, hints, answers to the review questions, the final's answer key |
 | `check.py`, `smoke.sh`, `incident.sh` | "done" verification, regression, incidents |
-| `gunicorn.conf.py` | configuration of the gunicorn variant (ex. 07) |
+| `gunicorn.conf.py` | configuration of the gunicorn variant (ex. 7) |
 | `docker-compose.yml`, `grafana/` | the observability stack, Redis, the mock, k6; dashboards and scrape config |
 | `results/` | k6 and run summaries (not in the repo) |
 

@@ -128,5 +128,5 @@ normally during that time.
 Answer: `solutions/questions_answers.md`, section "Mini-incidents".
 
 ---
-Stuck? `solutions/hints/ex07_hint1.md` → `hint2` → `hint3`. Ready-made solution:
+Stuck? `solutions/hints/ex07_hint1.md` → `hint2` → `hint3`. The ready-made solution:
 `solutions/ex07_gunicorn.py` → `gunicorn.conf.py`.
