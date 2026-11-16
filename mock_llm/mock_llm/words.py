@@ -1,13 +1,13 @@
-"""Słownik do generowania treści odpowiedzi atrapy (polszczyzna „ubezpieczeniowa")."""
-WORDS = """szkoda zgłoszenie polisa likwidacja odszkodowanie rzeczoznawca oględziny wycena kosztorys
-dokumentacja zdjęcia notatka policyjna sprawca poszkodowany pojazd naprawa warsztat serwis
-samochód zastępczy termin dni roboczych decyzja wypłata kwota franszyza udział własny suma
-ubezpieczenia ryzyko zakres ochrona umowa klient klientka uprzejmie informujemy prosimy
-przesłanie uzupełnienie dokumentów potwierdzamy przyjęcie zgłoszenia numer sprawy kontakt
-infolinia mieszkanie zalanie pożar kradzież włamanie stłuczka parking skrzyżowanie uszkodzenie
-drzwi zderzak błotnik szyba lakier mienie ruchomości sąsiad instalacja wodna hydraulik
-rachunek faktura przelew konto bankowe pełnomocnictwo oświadczenie sprawcy świadek protokół
-regres odmowa reklamacja odwołanie rzecznik wniosek analiza weryfikacja kompletność okoliczności
-zdarzenia data miejsce godzina opis przebieg skutki wartość rynkowa amortyzacja części oryginalne
-zamienniki likwidator opiekun sprawy i oraz w na z do że który która które dla przez po od
-jest są będzie zostanie zostały może należy prosimy dziękujemy pozdrawiamy""".split()
+"""A word list for generating the mock's response content (insurance-flavored English)."""
+WORDS = """claim report policy settlement compensation appraiser inspection estimate quotation documentation
+photographs police statement driver claimant vehicle repair workshop service rental car deadline business
+days decision payment amount deductible contribution total insurance risk coverage protection agreement
+customer policyholder kindly inform request submission supplement documents confirm receipt reference
+number contact hotline apartment flooding fire theft burglary collision parking intersection damage
+door bumper fender windshield paint property belongings neighbor plumbing plumber invoice transfer
+account bank authorization declaration witness protocol recourse refusal complaint appeal ombudsman
+application analysis verification completeness circumstances incident date location time description
+course consequences value market depreciation parts original replacement assessor caseworker
+adjuster premium liability approval summary delay waiting
+and of in on with to that which for by after from is are will be was may should thank regards please
+within""".split()

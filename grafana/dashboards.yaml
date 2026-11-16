@@ -1,7 +1,7 @@
 apiVersion: 1
 providers:
-  - name: "Kurs python-llm-perf"
-    folder: "Kurs python-llm-perf"
+  - name: "python-llm-perf course"
+    folder: "python-llm-perf course"
     type: file
     options:
       path: /otel-lgtm/dashboards-llmperf

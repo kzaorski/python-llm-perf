@@ -1,13 +1,13 @@
-"""Atrapa LLM zgodna z Messages API Anthropic (POST /v1/messages, stream i bez).
+"""A mock LLM compatible with the Anthropic Messages API (POST /v1/messages, streaming and not).
 
-Oficjalny SDK `anthropic` działa z nią po ustawieniu `base_url` (np. http://127.0.0.1:8061).
-Modeluje to, co liczy się w testach wydajności: rozkład czasu do pierwszego tokenu (TTFT),
-szybkość generowania, limity RPM/ITPM/OTPM (429 + `retry-after` + nagłówki
-`anthropic-ratelimit-*`), ograniczoną moc dostawcy (kolejka po jego stronie → 529),
-losowe 500/529, zerwany strumień. Konfiguracja: env `MOCK_*` + endpointy `/admin/*`.
+The official `anthropic` SDK works with it after you set `base_url` (e.g. http://127.0.0.1:8061).
+It models what matters in performance tests: the distribution of time to first token (TTFT),
+generation speed, RPM/ITPM/OTPM limits (429 + `retry-after` + `anthropic-ratelimit-*`
+headers), the provider's limited capacity (a queue on its side → 529),
+random 500/529, a broken stream. Configuration: `MOCK_*` env + the `/admin/*` endpoints.
 
-Dostawca `a` = ścieżki bez prefiksu (oraz `/a/...`), dostawca `b` = `/b/...`
-(np. `base_url="http://127.0.0.1:8061/b"`) — osobne limity i konfiguracja.
+Provider `a` = paths without a prefix (and `/a/...`), provider `b` = `/b/...`
+(e.g. `base_url="http://127.0.0.1:8061/b"`) — separate limits and configuration.
 """
 from __future__ import annotations
 
@@ -27,21 +27,21 @@ from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, ge
 from .config import PROFILES, PROVIDERS, SEED, ProviderConfig
 from .words import WORDS
 
-app = FastAPI(title="mock-llm (atrapa Messages API)", version="1.0")
+app = FastAPI(title="mock-llm (a Messages API mock)", version="1.0")
 
-M_REQ = Counter("mock_llm_requests_total", "Żądania do atrapy", ["provider", "status", "stream"])
+M_REQ = Counter("mock_llm_requests_total", "Requests to the mock", ["provider", "status", "stream"])
 M_TOK = Counter("mock_llm_tokens_total", "Tokeny", ["provider", "kind"])
-M_INFLIGHT = Gauge("mock_llm_generating", "Generacje w toku (zajęte sloty mocy)", ["provider"])
-M_WAITING = Gauge("mock_llm_provider_queue", "Żądania czekające na slot mocy dostawcy", ["provider"])
-M_QWAIT = Histogram("mock_llm_provider_queue_wait_seconds", "Czas czekania w kolejce dostawcy", ["provider"],
+M_INFLIGHT = Gauge("mock_llm_generating", "Generations in flight (occupied capacity slots)", ["provider"])
+M_WAITING = Gauge("mock_llm_provider_queue", "Requests waiting for a provider capacity slot", ["provider"])
+M_QWAIT = Histogram("mock_llm_provider_queue_wait_seconds", "Wait time in the provider queue", ["provider"],
                     buckets=(0.001, 0.005, 0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60, 120, 300))
-M_CANCEL = Counter("mock_llm_cancelled_total", "Żądania porzucone przez klienta (rozłączenie)",
+M_CANCEL = Counter("mock_llm_cancelled_total", "Requests abandoned by the client (disconnect)",
                    ["provider", "phase", "stream"])
-M_OLDEST = Gauge("mock_llm_oldest_inflight_seconds", "Wiek najstarszej generacji w toku", ["provider"])
+M_OLDEST = Gauge("mock_llm_oldest_inflight_seconds", "Age of the oldest generation in flight", ["provider"])
 
 
 class Bucket:
-    """Token bucket uzupełniany ciągle (jak limity Anthropic): pojemność = limit/min."""
+    """A token bucket refilled continuously (like Anthropic limits): capacity = limit/min."""
 
     def __init__(self, per_minute: int):
         self.cap = float(per_minute)
@@ -55,11 +55,11 @@ class Bucket:
         self.t = now
 
     def wait_for(self, n: float) -> float:
-        """Ile sekund do chwili, gdy w kubełku będzie n (0 = jest teraz)."""
+        """How many seconds until the bucket holds n (0 = it does now)."""
         self._refill()
         if self.cap <= 0 or self.level >= n:
             return 0.0
-        if n > self.cap:  # żądanie większe niż cały limit — nigdy nie przejdzie
+        if n > self.cap:  # a request larger than the whole limit — it will never pass
             return 60.0
         return (n - self.level) * 60.0 / self.cap
 
@@ -99,10 +99,10 @@ class Provider:
         self.waiting = 0
         self.cond = asyncio.Condition()
         self.stats: dict[str, int] = {}
-        self.active: dict[str, float] = {}   # msg_id -> monotonic start (generacje w toku)
+        self.active: dict[str, float] = {}   # msg_id -> monotonic start (generations in flight)
 
     def cancelled(self, phase: str, stream: bool):
-        """Klient rozłączył się: w kolejce dostawcy / przed pierwszym tokenem / w trakcie generacji."""
+        """The client disconnected: in the provider queue / before the first token / during generation."""
         key = f"cancelled_{phase}"
         self.stats[key] = self.stats.get(key, 0) + 1
         M_CANCEL.labels(self.name, phase, str(stream).lower()).inc()
@@ -118,7 +118,7 @@ class Provider:
     def limit_headers(self) -> dict:
         h = {}
         h.update(self.req.headers("requests"))
-        # „tokens" = najciaśniejszy z limitów tokenowych (jak w API)
+        # "tokens" = the tightest of the token limits (as in the API)
         h.update(self.itok.headers("input-tokens"))
         h.update(self.otok.headers("output-tokens"))
         tok = [b for b in (self.itok, self.otok) if b.cap > 0]
@@ -129,10 +129,10 @@ class Provider:
         return h
 
     async def acquire_slot(self) -> float:
-        """Czeka na slot mocy dostawcy; zwraca czas czekania [s].
+        """Waits for a provider capacity slot; returns the wait time [s].
 
-        `waiting` zwiększa wywołujący (synchronicznie, przed pierwszym `await`), żeby kontrola
-        przeciążenia (529) kolejnych żądań widziała kolejkę od razu; zmniejsza też wywołujący.
+        `waiting` is incremented by the caller (synchronously, before the first `await`), so that the overload
+        check (529) of subsequent requests sees the queue right away; the caller also decrements it.
         """
         t0 = time.perf_counter()
         async with self.cond:
@@ -153,7 +153,7 @@ class Provider:
 PROV: dict[str, Provider] = {p: Provider(p) for p in PROVIDERS}
 
 
-# ---------------------------------------------------------------- pomocnicze
+# ---------------------------------------------------------------- helpers
 
 def _err(status: int, etype: str, msg: str, headers: dict | None = None) -> JSONResponse:
     h = {"request-id": "req_mock_" + uuid.uuid4().hex[:20]}
@@ -219,12 +219,12 @@ def _provider(name: str | None) -> Provider | None:
 async def _messages(request: Request, pname: str | None):
     prov = _provider(pname)
     if prov is None:
-        return _err(404, "not_found_error", f"Nieznany dostawca {pname!r}")
+        return _err(404, "not_found_error", f"Unknown provider {pname!r}")
     cfg = prov.cfg
     try:
         body = await request.json()
     except Exception:
-        return _err(400, "invalid_request_error", "Nieprawidłowy JSON")
+        return _err(400, "invalid_request_error", "Invalid JSON")
     stream = bool(body.get("stream"))
     if cfg.require_api_key and not (request.headers.get("x-api-key") or request.headers.get("authorization")):
         prov.count(401, stream)
@@ -235,7 +235,7 @@ async def _messages(request: Request, pname: str | None):
         return bad
 
     rng = prov.rng
-    # błędy losowe przed przyjęciem
+    # random errors before accepting
     roll = rng.random()
     if roll < cfg.p_529:
         prov.count(529, stream)
@@ -246,7 +246,7 @@ async def _messages(request: Request, pname: str | None):
 
     in_tok = count_input_tokens(body)
     max_tokens = int(body["max_tokens"])
-    # limity: requests, input tokens, output tokens (szacowane z max_tokens)
+    # limits: requests, input tokens, output tokens (estimated from max_tokens)
     waits = {
         "requests": prov.req.wait_for(1),
         "input tokens": prov.itok.wait_for(in_tok),
@@ -261,7 +261,7 @@ async def _messages(request: Request, pname: str | None):
         return _err(429, "rate_limit_error",
                     f"This request would exceed your organization's rate limit of {lim:,} {worst} per minute. "
                     "For details, refer to: https://docs.claude.com/en/api/rate-limits.", h)
-    # przeciążenie: za długa kolejka po stronie dostawcy
+    # overload: the queue on the provider side is too long
     if cfg.overload_queue and prov.generating >= cfg.capacity and prov.waiting >= cfg.overload_queue:
         prov.count(529, stream)
         return _err(529, "overloaded_error", "Overloaded")
@@ -269,7 +269,7 @@ async def _messages(request: Request, pname: str | None):
     prov.itok.take(in_tok)
     prov.otok.take(max_tokens)
 
-    # długość odpowiedzi i czasy (losowane przy przyjęciu → powtarzalna sekwencja z MOCK_SEED)
+    # response length and times (drawn on acceptance → a repeatable sequence from MOCK_SEED)
     forced = request.headers.get("x-mock-output-tokens")
     if forced and forced.isdigit():
         target = int(forced)
@@ -283,7 +283,7 @@ async def _messages(request: Request, pname: str | None):
     if cfg.slow_ttft_p and rng.random() < cfg.slow_ttft_p:
         ttft += cfg.slow_ttft_ms / 1000.0
     tps = max(1.0, _lognorm(rng, cfg.tokens_per_s, cfg.tokens_per_s_sigma))
-    # długi ogon (wywołania wielominutowe): długi TTFT albo rozciągnięta generacja
+    # a long tail (multi-minute calls): a long TTFT or a stretched generation
     kind = "short"
     if cfg.long_p and rng.random() < cfg.long_p:
         kinds = [k for k, on in (("ttft", cfg.long_ttft_s_max > 0), ("gen", cfg.long_total_s_max > 0)) if on]
@@ -293,7 +293,7 @@ async def _messages(request: Request, pname: str | None):
                 ttft = rng.uniform(cfg.long_ttft_s_min, cfg.long_ttft_s_max)
             else:
                 tps = out_tok / max(0.001, rng.uniform(cfg.long_total_s_min, cfg.long_total_s_max))
-    # nadpisanie per żądanie (testy powtarzalne, k6): x-mock-ttft-ms, x-mock-total-s
+    # a per-request override (repeatable tests, k6): x-mock-ttft-ms, x-mock-total-s
     h_ttft, h_total = request.headers.get("x-mock-ttft-ms"), request.headers.get("x-mock-total-s")
     if h_ttft:
         ttft, kind = float(h_ttft) / 1000.0, "header"
@@ -359,7 +359,7 @@ async def _messages(request: Request, pname: str | None):
         state = {"gone": False, "phase": "queue"}
 
         async def pause(secs: float, may_ping: bool):
-            """Czeka `secs`, sprawdzając rozłączenie klienta; w trakcie ciszy wysyła `ping`."""
+            """Waits `secs`, checking for a client disconnect; sends `ping` during the silence."""
             end = time.monotonic() + secs
             ping = cfg.ping_interval_s if may_ping else 0.0
             next_ping = time.monotonic() + ping if ping > 0 else math.inf
@@ -435,7 +435,7 @@ async def _messages(request: Request, pname: str | None):
 
 
 async def _sleep_or_gone(request: Request, secs: float) -> bool:
-    """Śpi `secs`; co 0.5 s sprawdza rozłączenie klienta. True = klient się rozłączył."""
+    """Sleeps `secs`; every 0.5 s checks for a client disconnect. True = the client disconnected."""
     end = time.monotonic() + secs
     while (rem := end - time.monotonic()) > 0:
         await asyncio.sleep(min(rem, 0.5))
@@ -445,15 +445,15 @@ async def _sleep_or_gone(request: Request, secs: float) -> bool:
 
 
 async def _acquire_or_gone(prov: "Provider", request: Request) -> float | None:
-    """Czeka na slot mocy dostawcy, ale porzuca czekanie, gdy klient się rozłączy (None)."""
+    """Waits for a provider capacity slot, but gives up waiting when the client disconnects (None)."""
     if prov.waiting == 0 and prov.generating < max(1, prov.cfg.capacity):
-        # szybka ścieżka bez `await`: slot zajęty natychmiast, więc kontrola przeciążenia
-        # następnych żądań z tej samej paczki widzi go od razu
+        # a fast path without `await`: the slot is taken immediately, so the overload check
+        # of the next requests from the same batch sees it right away
         prov.generating += 1
         M_INFLIGHT.labels(prov.name).set(prov.generating)
         M_QWAIT.labels(prov.name).observe(0.0)
         return 0.0
-    prov.waiting += 1  # synchronicznie — patrz Provider.acquire_slot
+    prov.waiting += 1  # synchronously — see Provider.acquire_slot
     M_WAITING.labels(prov.name).set(prov.waiting)
     task = asyncio.ensure_future(prov.acquire_slot())
     try:
@@ -467,7 +467,7 @@ async def _acquire_or_gone(prov: "Provider", request: Request) -> float | None:
                     await task
                 except asyncio.CancelledError:
                     return None
-                await prov.release_slot()  # slot przyznany w ostatniej chwili — oddaj
+                await prov.release_slot()  # the slot was granted at the last moment — give it back
                 return None
     except asyncio.CancelledError:
         task.cancel()
@@ -520,7 +520,7 @@ async def metrics():
 async def get_config(provider: str = "a"):
     p = _provider(provider)
     if p is None:
-        return _err(404, "not_found_error", f"Nieznany dostawca {provider!r}")
+        return _err(404, "not_found_error", f"Unknown provider {provider!r}")
     return {"provider": provider, "config": p.cfg.as_dict(), "profiles": sorted(PROFILES)}
 
 
@@ -528,10 +528,10 @@ async def get_config(provider: str = "a"):
 async def patch_config(request: Request, provider: str = "a"):
     p = _provider(provider)
     if p is None:
-        return _err(404, "not_found_error", f"Nieznany dostawca {provider!r}")
+        return _err(404, "not_found_error", f"Unknown provider {provider!r}")
     unknown = p.cfg.update(await request.json())
     if unknown:
-        return _err(400, "invalid_request_error", f"Nieznane klucze: {unknown}")
+        return _err(400, "invalid_request_error", f"Unknown keys: {unknown}")
     p.req, p.itok, p.otok = Bucket(p.cfg.rpm), Bucket(p.cfg.itpm), Bucket(p.cfg.otpm)
     async with p.cond:
         p.cond.notify_all()
@@ -542,7 +542,7 @@ async def patch_config(request: Request, provider: str = "a"):
 async def set_profile(name: str, provider: str = "a"):
     p = _provider(provider)
     if p is None or name not in PROFILES:
-        return _err(404, "not_found_error", f"Nieznany profil/dostawca; profile: {sorted(PROFILES)}")
+        return _err(404, "not_found_error", f"Unknown profile/provider; profiles: {sorted(PROFILES)}")
     p.cfg = ProviderConfig.from_env()
     p.cfg.update(PROFILES[name])
     p.req, p.itok, p.otok = Bucket(p.cfg.rpm), Bucket(p.cfg.itpm), Bucket(p.cfg.otpm)

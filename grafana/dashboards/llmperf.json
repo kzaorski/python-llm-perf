@@ -1,6 +1,6 @@
 {
   "uid": "llmperf",
-  "title": "LLM perf — przegląd",
+  "title": "LLM perf — overview",
   "tags": ["python-llm-perf"],
   "timezone": "browser",
   "schemaVersion": 41,
@@ -11,14 +11,14 @@
     {
       "id": 1,
       "type": "text",
-      "title": "Kurs python-llm-perf",
+      "title": "python-llm-perf course",
       "gridPos": {"h": 4, "w": 24, "x": 0, "y": 0},
-      "options": {"mode": "markdown", "content": "Dashboard kursu — panele dodajesz w ćwiczeniach.\n\nŹródła danych: `prometheus`, `tempo`, `loki`, `pyroscope`."}
+      "options": {"mode": "markdown", "content": "Course dashboard — you add panels in the exercises.\n\nData sources: `prometheus`, `tempo`, `loki`, `pyroscope`."}
     },
     {
       "id": 2,
       "type": "timeseries",
-      "title": "Atrapa LLM — odpowiedzi/s wg statusu",
+      "title": "Mock LLM — responses/s by status",
       "gridPos": {"h": 8, "w": 24, "x": 0, "y": 4},
       "datasource": {"type": "prometheus", "uid": "prometheus"},
       "targets": [{"refId": "A", "datasource": {"type": "prometheus", "uid": "prometheus"},

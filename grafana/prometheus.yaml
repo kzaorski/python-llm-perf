@@ -37,10 +37,10 @@ storage:
     # A 10min time window is enough because it can easily absorb retries and network delays.
     out_of_order_time_window: 10m
 
-# --- kurs python-llm-perf: scrapowanie atrapy LLM (kontener) i workera kolejki (host) ---
-# Aplikacja (uvicorn i gunicorn) wysyła metryki przez OTLP (push) — scrape jej nie dotyczy.
-# Reszta pliku = domyślna z obrazu grafana/otel-lgtm:0.39.0. host.docker.internal działa w Docker
-# Desktop (macOS/Windows); na Linuksie zapewnia go `extra_hosts: host-gateway` w compose.
+# --- python-llm-perf course: scraping the mock LLM (container) and the queue worker (host) ---
+# The app (uvicorn and gunicorn) sends metrics over OTLP (push) — scraping does not apply to it.
+# The rest of the file = the default from the grafana/otel-lgtm:0.39.0 image. host.docker.internal works in Docker
+# Desktop (macOS/Windows); on Linux it is provided by `extra_hosts: host-gateway` in compose.
 scrape_configs:
   - job_name: mock-llm
     scrape_interval: 5s

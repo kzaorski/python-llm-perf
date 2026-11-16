@@ -1,8 +1,8 @@
-# Kurs python-llm-perf — stos: LGTM (Grafana + Prometheus + Tempo + Loki + Pyroscope + OTel Collector),
-# Redis (broker kolejki zadań i cache), atrapa LLM zgodna z Messages API Anthropic, k6 (generator ruchu).
-# Aplikacja FastAPI, wariant gunicorn i worker kolejki działają LOKALNIE (edytujesz je w ćwiczeniach).
-# Uruchamiaj jako projekt `llmperf`: `docker compose up -d --wait`.
-# Wszystkie porty hosta tylko na 127.0.0.1 (tabela portów: README).
+# python-llm-perf course — the stack: LGTM (Grafana + Prometheus + Tempo + Loki + Pyroscope + OTel Collector),
+# Redis (the task queue broker and the cache), a mock LLM compatible with the Anthropic Messages API, k6 (a load generator).
+# The FastAPI app, the gunicorn variant and the queue worker run LOCALLY (you edit them in the exercises).
+# Run it as the `llmperf` project: `docker compose up -d --wait`.
+# All host ports on 127.0.0.1 only (the port table: README).
 name: llmperf
 
 services:
@@ -26,8 +26,8 @@ services:
       - ./grafana/dashboards:/otel-lgtm/dashboards-llmperf:ro
       - lgtm-data:/data
     healthcheck:
-      # run-all.sh tworzy /tmp/ready, gdy WSZYSTKIE komponenty (w tym Pyroscope) są gotowe;
-      # w obrazie jest curl (nie ma wget).
+      # run-all.sh creates /tmp/ready when ALL components (including Pyroscope) are ready;
+      # the image has curl (no wget).
       test: ["CMD-SHELL", "test -f /tmp/ready && curl -fsS http://127.0.0.1:3000/api/health >/dev/null"]
       interval: 5s
       timeout: 5s
@@ -53,7 +53,7 @@ services:
     ports:
       - "127.0.0.1:${MOCK_LLM_PORT:-8061}:8061"
     environment:
-      # Wartości domyślne atrapy (zmiana w locie: PATCH /admin/config, POST /admin/profile/<nazwa>).
+      # Mock defaults (change at runtime: PATCH /admin/config, POST /admin/profile/<name>).
       MOCK_SEED: ${MOCK_SEED:-20261031}
       MOCK_TTFT_MEDIAN_MS: ${MOCK_TTFT_MEDIAN_MS:-450}
       MOCK_TOKENS_PER_S: ${MOCK_TOKENS_PER_S:-250}
@@ -70,8 +70,8 @@ services:
       start_period: 20s
       retries: 20
 
-  # Generator ruchu: `docker compose run --rm k6 run /scripts/smoke.js`
-  # (profil `tools` — nie startuje przy `up`). Metryki → Prometheus (remote write).
+  # Load generator: `docker compose run --rm k6 run /scripts/smoke.js`
+  # (the `tools` profile — it does not start on `up`). Metrics → Prometheus (remote write).
   k6:
     image: grafana/k6:2.3.0
     profiles: ["tools"]
@@ -88,8 +88,8 @@ services:
       - ./k6:/scripts:ro
       - ./solutions:/solutions:ro
       - ./data:/data:ro
-      # podsumowania testów (handleSummary → /wyniki/<nazwa>.json) — czyta je check.py i scripts/pomiar.py
-      - ./wyniki:/wyniki
+      # test summaries (handleSummary → /results/<name>.json) — read by check.py and scripts/measure.py
+      - ./results:/results
     depends_on:
       lgtm: { condition: service_healthy }
 

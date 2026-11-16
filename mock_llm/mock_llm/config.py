@@ -1,7 +1,7 @@
-"""Konfiguracja atrapy LLM: wartości domyślne z env (MOCK_*), zmiana w locie przez /admin.
+"""Mock LLM configuration: defaults from env (MOCK_*), changed at runtime through /admin.
 
-Każdy „dostawca" (`a` — domyślny, `b` — zapasowy do ćwiczeń z fallbackiem) ma własną
-konfigurację, własne kubełki limitów i własną pulę mocy obliczeniowej.
+Each "provider" (`a` — the default, `b` — the fallback for the fallback exercises) has its own
+configuration, its own limit buckets and its own compute capacity pool.
 """
 from __future__ import annotations
 
@@ -20,42 +20,42 @@ def _env(name: str, default, cast):
 
 @dataclass
 class ProviderConfig:
-    # --- opóźnienia ---
-    ttft_median_ms: float = 450.0       # mediana czasu do pierwszego tokenu (rozkład log-normalny)
-    ttft_sigma: float = 0.35            # sigma log-normalnego TTFT (0 = stała wartość)
-    prefill_ms_per_1k_tokens: float = 40.0  # dodatkowe ms TTFT na każde 1000 tokenów wejścia
-    tokens_per_s: float = 250.0         # mediana szybkości generowania (tokeny/s)
+    # --- delays ---
+    ttft_median_ms: float = 450.0       # median time to first token (log-normal distribution)
+    ttft_sigma: float = 0.35            # sigma of the log-normal TTFT (0 = a constant value)
+    prefill_ms_per_1k_tokens: float = 40.0  # extra TTFT ms per 1000 input tokens
+    tokens_per_s: float = 250.0         # median generation speed (tokens/s)
     tokens_per_s_sigma: float = 0.15
-    slow_ttft_p: float = 0.0            # prawdopodobieństwo „wolnego pierwszego tokenu"
-    slow_ttft_ms: float = 3000.0        # ile ms dokłada wolny pierwszy token
-    chunk_tokens: int = 3               # tokenów na jedno zdarzenie content_block_delta
-    # --- długość odpowiedzi ---
-    out_ratio: float = 0.7              # mediana długości odpowiedzi jako ułamek max_tokens
+    slow_ttft_p: float = 0.0            # probability of a "slow first token"
+    slow_ttft_ms: float = 3000.0        # how many ms a slow first token adds
+    chunk_tokens: int = 3               # tokens per content_block_delta event
+    # --- response length ---
+    out_ratio: float = 0.7              # median response length as a fraction of max_tokens
     out_sigma: float = 0.25
     out_tokens_max: int = 4000
-    # --- limity dostawcy (token bucket, uzupełniany ciągle; 0 = bez limitu) ---
-    rpm: int = 4000                     # żądania na minutę
-    itpm: int = 2000000                 # tokeny wejścia na minutę
-    otpm: int = 400000                     # tokeny wyjścia na minutę (szacowane z max_tokens na starcie)
-    # --- moc obliczeniowa dostawcy ---
-    capacity: int = 64                  # ile generacji naraz; nadmiar czeka w kolejce dostawcy
-    overload_queue: int = 256           # >tyle czekających → 529 overloaded_error (0 = bez limitu)
-    # --- błędy losowe ---
-    p_529: float = 0.0                  # prawdopodobieństwo 529 overloaded_error na wejściu
-    p_500: float = 0.0                  # prawdopodobieństwo 500 api_error na wejściu
-    stream_error_p: float = 0.0         # prawdopodobieństwo zdarzenia `error` w połowie strumienia
-    # --- wywołania wielominutowe (ogon długich odpowiedzi; 0 = wyłączone) ---
-    long_p: float = 0.0                 # odsetek żądań z „długiego ogona" (losowane z MOCK_SEED)
-    long_ttft_s_min: float = 0.0        # długi TTFT: cisza przed pierwszym tokenem, U[min,max] s
+    # --- provider limits (a token bucket, refilled continuously; 0 = no limit) ---
+    rpm: int = 4000                     # requests per minute
+    itpm: int = 2000000                 # input tokens per minute
+    otpm: int = 400000                     # output tokens per minute (estimated from max_tokens at the start)
+    # --- provider compute capacity ---
+    capacity: int = 64                  # how many generations at once; the excess waits in the provider's queue
+    overload_queue: int = 256           # more than this many waiting → 529 overloaded_error (0 = no limit)
+    # --- random errors ---
+    p_529: float = 0.0                  # probability of a 529 overloaded_error on entry
+    p_500: float = 0.0                  # probability of a 500 api_error on entry
+    stream_error_p: float = 0.0         # probability of an `error` event in the middle of a stream
+    # --- multi-minute calls (the tail of long responses; 0 = off) ---
+    long_p: float = 0.0                 # the share of requests from the "long tail" (drawn from MOCK_SEED)
+    long_ttft_s_min: float = 0.0        # long TTFT: silence before the first token, U[min,max] s
     long_ttft_s_max: float = 0.0
-    long_total_s_min: float = 0.0       # długa generacja: łączny czas generowania U[min,max] s
-    long_total_s_max: float = 0.0       #   (tempo tokenów dobierane tak, by trafić w ten czas)
-    stall_p: float = 0.0                # prawdopodobieństwo pauzy przed fragmentem strumienia
-    stall_ms: float = 0.0               # długość pauzy między fragmentami
-    early_start: bool = False           # stream: message_start od razu po przyjęciu, cisza potem
-    ping_interval_s: float = 0.0        # stream: zdarzenia `ping` co N s w trakcie ciszy (0 = brak)
-    # --- zgodność z API ---
-    reject_sampling_params: bool = True  # modele 5.x: temperature/top_p/top_k → 400
+    long_total_s_min: float = 0.0       # long generation: the total generation time U[min,max] s
+    long_total_s_max: float = 0.0       #   (the token rate is chosen to hit this time)
+    stall_p: float = 0.0                # probability of a pause before a stream chunk
+    stall_ms: float = 0.0               # the length of a pause between chunks
+    early_start: bool = False           # stream: message_start right after accepting, silence afterwards
+    ping_interval_s: float = 0.0        # stream: `ping` events every N s during the silence (0 = none)
+    # --- API compatibility ---
+    reject_sampling_params: bool = True  # 5.x models: temperature/top_p/top_k → 400
     require_api_key: bool = True
 
     @classmethod
@@ -66,7 +66,7 @@ class ProviderConfig:
         return cls(**kw)
 
     def update(self, data: dict) -> list[str]:
-        """Częściowa aktualizacja (PATCH). Zwraca listę nieznanych kluczy."""
+        """A partial update (PATCH). Returns the list of unknown keys."""
         unknown = []
         types = {f.name: type(f.default) for f in fields(self)}
         for k, v in data.items():
@@ -81,31 +81,31 @@ class ProviderConfig:
         return asdict(self)
 
 
-# Profile nazwane: szybkie przełączanie scenariuszy w ćwiczeniach (POST /admin/profile/<nazwa>).
+# Named profiles: quick switching of scenarios in the exercises (POST /admin/profile/<name>).
 PROFILES: dict[str, dict] = {
-    "domyslny": {},
-    # limity jak na niskim progu konta: łatwo dobić 429 z jednej maszyny
-    "limity": {"rpm": 120, "itpm": 60000, "otpm": 12000},
-    # dostawca z małą mocą: 8 generacji naraz, kolejka 8, powyżej — 529 overloaded
-    "przeciazenie": {"capacity": 8, "overload_queue": 8},
-    # co piąte wywołanie z bardzo wolnym pierwszym tokenem
-    "wolny-start": {"slow_ttft_p": 0.2, "slow_ttft_ms": 3000},
-    # niestabilny dostawca: losowe 529/500 i zerwane strumienie
-    "niestabilny": {"p_529": 0.05, "p_500": 0.02, "stream_error_p": 0.03},
-    # --- profile minutowe (wymaganie: wywołania 60–300 s) ---
-    # każde wywołanie: 60–180 s ciszy przed pierwszym tokenem, potem zwykłe tempo
-    "dlugi-ttft": {"long_p": 1.0, "long_ttft_s_min": 60, "long_ttft_s_max": 180},
-    # krótki TTFT, ale generowanie rozciągnięte na 120–300 s (stream lub non-stream)
-    "dlugi-stream": {"long_p": 1.0, "long_total_s_min": 120, "long_total_s_max": 300},
-    # mieszany ruch: 80% krótkich, 20% ogona 60–300 s (połowa ogona = długi TTFT)
-    "mieszany": {"long_p": 0.2, "long_ttft_s_min": 60, "long_ttft_s_max": 180,
-                 "long_total_s_min": 60, "long_total_s_max": 240},
-    # strumień z pauzami: ~2% fragmentów poprzedza 20 s ciszy (test read/idle timeoutu)
-    "pauzy": {"long_p": 1.0, "long_total_s_min": 60, "long_total_s_max": 120,
-              "stall_p": 0.02, "stall_ms": 20000},
-    # jak dlugi-ttft, ale nagłówki i message_start od razu + ping co 15 s (keep-alive)
-    "dlugi-ttft-ping": {"long_p": 1.0, "long_ttft_s_min": 60, "long_ttft_s_max": 180,
-                        "early_start": True, "ping_interval_s": 15},
+    "default": {},
+    # limits like on a low account tier: easy to hit a 429 from one machine
+    "limits": {"rpm": 120, "itpm": 60000, "otpm": 12000},
+    # a provider with little capacity: 8 generations at once, a queue of 8, above that — 529 overloaded
+    "overload": {"capacity": 8, "overload_queue": 8},
+    # every fifth call with a very slow first token
+    "slow-start": {"slow_ttft_p": 0.2, "slow_ttft_ms": 3000},
+    # an unstable provider: random 529/500 and broken streams
+    "unstable": {"p_529": 0.05, "p_500": 0.02, "stream_error_p": 0.03},
+    # --- minute-long profiles (requirement: calls of 60–300 s) ---
+    # every call: 60–180 s of silence before the first token, then the usual rate
+    "long-ttft": {"long_p": 1.0, "long_ttft_s_min": 60, "long_ttft_s_max": 180},
+    # a short TTFT, but the generation stretched to 120–300 s (stream or non-stream)
+    "long-stream": {"long_p": 1.0, "long_total_s_min": 120, "long_total_s_max": 300},
+    # mixed traffic: 80% short, 20% a 60–300 s tail (half of the tail = a long TTFT)
+    "mixed": {"long_p": 0.2, "long_ttft_s_min": 60, "long_ttft_s_max": 180,
+              "long_total_s_min": 60, "long_total_s_max": 240},
+    # a stream with pauses: ~2% of chunks are preceded by 20 s of silence (a read/idle timeout test)
+    "pauses": {"long_p": 1.0, "long_total_s_min": 60, "long_total_s_max": 120,
+               "stall_p": 0.02, "stall_ms": 20000},
+    # like long-ttft, but headers and message_start right away + a ping every 15 s (keep-alive)
+    "long-ttft-ping": {"long_p": 1.0, "long_ttft_s_min": 60, "long_ttft_s_max": 180,
+                       "early_start": True, "ping_interval_s": 15},
 }
 
 SEED = _env("MOCK_SEED", 20261031, int)
