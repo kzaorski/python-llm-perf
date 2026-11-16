@@ -1,109 +1,112 @@
-# Ćwiczenie 11: Zapasowy dostawca z wyłącznikiem (circuit breaker)
+# Exercise 11: A fallback provider with a circuit breaker
 
-> Czas: ~40 min (dwa przebiegi po 40 s + opróżnianie) + mini-incydent III ~20 min
+> Time: ~40 min (two runs of 40 s + draining) + mini-incident III ~20 min
 
-> Blok III. Czytanka `08a-limity-retry-timeouty.md` (fallback, wyłącznik, stany zamknięty/otwarty/półotwarty).
+> Block III. Reading `08a-limits-retries-timeouts.md` (fallback, circuit breaker, the closed/open/half-open states).
 
-## Cel
-Aplikacja ma zapasowego dostawcę `b` (w atrapie: osobne limity i moc, ścieżka `/b/v1/messages`).
-Gdy `a` zawiśnie, KAŻDE żądanie najpierw płaci pełny timeout u `a`, a dopiero potem idzie do `b`.
-Mierzysz ten koszt pod obciążeniem i dopisujesz wyłącznik: po kilku awariach przestajemy pytać `a`
-na jakiś czas, potem sprawdzamy go pojedynczą próbką.
+## Goal
+The application has a fallback provider `b` (in the mock: separate limits and capacity, path
+`/b/v1/messages`). When `a` hangs, EVERY request first pays the full timeout at `a` and only then goes to
+`b`. You measure that cost under load and add a circuit breaker: after a few failures we stop asking `a`
+for a while, then we check on it with a single probe request.
 
-## Teoria w pigułce
-- **Fallback bez pamięci** — „spróbuj `a`, jak się nie uda, to `b`”. Przy trwałej awarii `a` czas
-  każdego żądania = timeout `a` + czas `b`, a sloty są zajęte przez czekanie na `a`. Pułapka: w metrykach
-  sukcesów wszystko „działa”, tylko p50 skacze o timeout.
-- **Wyłącznik (circuit breaker)** — trzy stany: **zamknięty** (ruch do `a`, liczymy kolejne awarie) →
-  po N awariach **otwarty** (przez T sekund od razu `b`, `a` dostaje czas na podniesienie się) → po T
-  **półotwarty** (jedna próbka do `a`; sukces zamyka, porażka znów otwiera). Po co: awaria kosztuje N
-  timeoutów, a nie wszystkie. Pułapka: żądania, które już czekają na `a`, i tak zapłacą timeout.
-- **Co jest awarią?** Zawieszenie, błąd połączenia, 5xx — tak. **429 i 529 — nie**: to „za dużo ruchu”,
-  a przerzucenie go na `b` przenosi burzę na zapasowego dostawcę. `APITimeoutError` jest podklasą
-  `APIConnectionError` (łapie ją `except APIConnectionError`), a `OverloadedError` (529) nie jest
-  podklasą `InternalServerError`.
-- **Widoczność stanu** — stan wyłącznika jako atrybut spanu (`llm.cb.stan`) i licznik przejść w `/diag`.
-  Bez tego „dlaczego ruch idzie do b?” to zagadka.
+## Theory in a nutshell
+- **A fallback without memory** — "try `a`, and if that fails, `b`". With a lasting failure of `a`, the time
+  of every request = the timeout of `a` + the time of `b`, and the slots are tied up waiting for `a`.
+  Pitfall: in the success metrics everything "works", only p50 jumps by the timeout.
+- **A circuit breaker** — three states: **closed** (traffic to `a`, we count consecutive failures) → after
+  N failures **open** (for T seconds straight to `b`, giving `a` time to get back on its feet) → after T
+  **half-open** (one probe request to `a`; success closes, failure opens again). Why: an outage costs N
+  timeouts, not all of them. Pitfall: requests that are already waiting for `a` will pay the timeout anyway.
+- **What counts as a failure?** A hang, a connection error, a 5xx — yes. **429 and 529 — no**: they mean
+  "too much traffic", and moving it to `b` carries the storm over to the backup provider.
+  `APITimeoutError` is a subclass of `APIConnectionError` (`except APIConnectionError` catches it), and
+  `OverloadedError` (529) is not a subclass of `InternalServerError`.
+- **State visibility** — the breaker state as a span attribute (`llm.cb.state`) and a transition counter in
+  `/diag`. Without them, "why is traffic going to b?" is a puzzle.
 
-## Kroki
-1. Stan po ćw. 10, aplikacja na 8060 uruchomiona **normalnie** (fallback włączony, `LLM_FALLBACK=1`
-   domyślnie). Klient krótkich ma po ćw. 10 `read=15 s`.
-2. Awaria `a`: dostawca milczy 30 s przed pierwszym tokenem (dłużej niż nasz read timeout):
+## Steps
+1. State after ex. 10, application on 8060 started **normally** (fallback on, `LLM_FALLBACK=1` is the
+   default). After ex. 10 the short client has `read=15 s`.
+2. A failure of `a`: the provider is silent for 30 s before the first token (longer than our read timeout):
    ```bash
    curl -s -X PATCH '127.0.0.1:8061/admin/config?provider=a' -H 'content-type: application/json' \
      -d '{"ttft_median_ms": 30000, "ttft_sigma": 0}'
    ```
-3. **Hipoteza:** ruch 2/s przez 40 s. Ile wyniesie mediana czasu odpowiedzi? Ile z 80 żądań trafi do `a`?
+3. **Hypothesis:** traffic of 2/s for 40 s. What will the median response time be? How many of the 80
+   requests will go to `a`?
    ```bash
-   docker compose run --rm -e WYNIK=ex11-przed k6 run -o experimental-prometheus-rw /scripts/otwarty.js -e RATE=2 -e CZAS=40s
+   docker compose run --rm -e RESULT=ex11-before k6 run -o experimental-prometheus-rw /scripts/open_model.js -e RATE=2 -e DURATION=40s
    curl -s 127.0.0.1:8061/admin/stats | python -m json.tool | head -30
    ```
-   U mnie: 71 × 200 (wszystkie z `b`), p50 **16.1 s** (15 s read timeout `a` + wywołanie `b`); atrapa: `a` —
-   **71 × `cancelled_generating`** (każde żądanie najpierw czekało na `a`), `b` — 71 × 200. Prometheus:
-   `sum by (provider) (increase(mock_llm_requests_total[2m]))` liczy tylko odpowiedzi dokończone (`a` = 0,
-   `b` ≈ 74), więc próby do `a` zobaczysz w `sum by (provider) (increase(mock_llm_cancelled_total[2m]))`.
-4. Otwórz **`app/llm/fallback.py`** (`TODO ćw. 11`). Dopisz klasę wyłącznika (stan, licznik kolejnych
-   awarii, czas otwarcia, flaga „próbka w toku”) i użyj jej w `wywolaj()`: pytaj `a` tylko, gdy
-   wyłącznik pozwala; sukces → zamknij; awaria (`_awaria(e)`) → policz; inny błąd → przepuść dalej.
-   Ustaw atrybut `llm.cb.stan` na bieżącym spanie i zapisuj przejścia stanów do `stan.WYNIKI`
-   (`("cb", "a", "zamkniety->otwarty")`) — zobaczysz je w `/diag`. Progi: 5 awarii, 30 s otwarcia.
-5. Restart aplikacji, ponownie `PATCH` z kroku 2, powtórka kroku 3 z `-e WYNIK=ex11-po`. U mnie: 73 × 200,
-   p50 **1.31 s** (p90 16.1 s — tylko żądania sprzed otwarcia wyłącznika); do `a` trafiło **28** (przerwane),
-   w `/diag` jedno przejście `zamkniety->otwarty`; `check.py ex11`: mediana 1.05 s, do `a` 1/80.
-   W `/diag` → `wyniki` szukaj wpisów `endpoint: "cb"`. W Tempo:
+   In my run: 71 × 200 (all from `b`), p50 **16.1 s** (15 s read timeout of `a` + the call to `b`); mock: `a` —
+   **71 × `cancelled_generating`** (every request first waited on `a`), `b` — 71 × 200. Prometheus:
+   `sum by (provider) (increase(mock_llm_requests_total[2m]))` counts only completed responses (`a` = 0,
+   `b` ≈ 74), so you will see the attempts to `a` in
+   `sum by (provider) (increase(mock_llm_cancelled_total[2m]))`.
+4. Open **`app/llm/fallback.py`** (`TODO ex. 11`). Add a breaker class (state, a consecutive failure
+   counter, the opening time, a "probe in flight" flag) and use it in `invoke()`: ask `a` only when the
+   breaker allows it; success → close; failure (`_is_outage(e)`) → count it; any other error → let it
+   propagate. Set the `llm.cb.state` attribute on the current span and write the state transitions to
+   `state.OUTCOMES` (`("cb", "a", "closed->open")`) — you will see them in `/diag`. Thresholds: 5 failures,
+   30 s open.
+5. Restart the application, run the `PATCH` from step 2 again, and repeat step 3 with `-e RESULT=ex11-after`.
+   In my run: 73 × 200, p50 **1.31 s** (p90 16.1 s — only requests from before the breaker opened); **28**
+   went to `a` (aborted), and `/diag` shows one `closed->open` transition; `check.py ex11`: median 1.05 s,
+   to `a` 1/80. In `/diag` → `outcomes` look for entries with `endpoint: "cb"`. In Tempo:
    ```
-   {span.llm.cb.stan="otwarty"}
+   {span.llm.cb.state="open"}
    ```
-   U mnie (harness, ten sam scenariusz): p50 **19.8 s**, do `a` **80/80** → p50 **7.7 s**, do `a` **33/80**.
-   Naprawa ma granicę: ~30 żądań było już w locie do `a`, zanim wyłącznik się otworzył — te zapłaciły
-   pełne 15 s (p90 22 s).
-6. `curl -s -X POST 127.0.0.1:8061/admin/reset` i `python check.py ex11`.
+   In my run (harness, the same scenario): p50 **19.8 s**, to `a` **80/80** → p50 **7.7 s**, to `a` **33/80**.
+   The fix has a limit: ~30 requests were already in flight to `a` before the breaker opened — they paid
+   the full 15 s (p90 22 s).
+6. `curl -s -X POST 127.0.0.1:8061/admin/reset` and `python check.py ex11`.
 
-## Kryteria „done”
-- [ ] Przy zawieszonym `a` mediana odpowiedzi spada poniżej 12 s, a do `a` trafia < 60% żądań.
-- [ ] 429/529 NIE przełączają ruchu na `b` (sprawdź `_awaria`).
-- [ ] Stan wyłącznika widać w trace (`llm.cb.stan`) i w `/diag`.
-- [ ] `python check.py ex11` przechodzi.
+## Definition of done
+- [ ] With `a` hung, the median response time drops below 12 s, and < 60% of requests go to `a`.
+- [ ] 429/529 do NOT switch traffic to `b` (check `_is_outage`).
+- [ ] The breaker state is visible in the trace (`llm.cb.state`) and in `/diag`.
+- [ ] `python check.py ex11` passes.
 
-## Pytania kontrolne
-1. Dlaczego 529 nie może otwierać wyłącznika ani włączać fallbacku?
-2. Co by się stało, gdyby w stanie półotwartym przepuścić do `a` wszystkie żądania zamiast jednego?
-3. Wróć do ćw. 6, krok 8: jak wyłącznik zmienia skutki `PoolTimeout` przy włączonym fallbacku?
+## Review questions
+1. Why must a 529 neither open the breaker nor trigger the fallback?
+2. What would happen if, in the half-open state, all requests were let through to `a` instead of one?
+3. Go back to ex. 6, step 8: how does the breaker change the effects of a `PoolTimeout` with the fallback on?
 
-Odpowiedzi: `solutions/pytania_odpowiedzi.md`.
+Answers: `solutions/questions_answers.md`.
 
-## ★ Bonus (opcjonalnie)
-Dodaj gauge stanu wyłącznika (0/1/2) do metryk i panel w Grafanie obok `mock_llm_requests_total`
-per dostawca. Ustaw `CB_OTWARCIE_S=5` i zobacz próbki półotwarte co 5 s w trakcie awarii.
+## ★ Bonus (optional)
+Add a breaker state gauge (0/1/2) to the metrics and a panel in Grafana next to `mock_llm_requests_total`
+per provider. Set `CB_OPEN_S=5` and watch the half-open probes every 5 s during an outage.
 
 ---
 
-## Mini-incydent III (po bloku III) — „dostawca mówi: przeciążenie; my mówimy: mamy mało ruchu”
+## Mini-incident III (after Block III) — "the provider says overload; we say our traffic is low"
 
-> ~20 min. Diagnoza przez `/diag`, Prometheus i `/admin/stats` atrapy; bez kodu.
+> ~20 min. Diagnosis through `/diag`, Prometheus and the mock's `/admin/stats`; no code.
 
-Dostawca przysłał zgłoszenie: w godzinach szczytu wasza aplikacja wysyła mu kilka razy więcej żądań,
-niż macie użytkowników, i to falami. U was ruch to ~10 streszczeń/s.
+The provider sent a report: during peak hours your application sends it several times more requests than
+you have users, and in waves. Your traffic is ~10 summaries/s.
 
-1. Zatrzymaj własną aplikację i uruchom incydent (ustawia też profil atrapy `przeciazenie`):
+1. Stop your own application and start the incident (it also sets the mock's `overload` profile):
    ```bash
-   ./incydent.sh start mini-III
-   docker compose run --rm -e WYNIK=mini-III k6 run -o experimental-prometheus-rw /scripts/otwarty.js -e RATE=10 -e CZAS=20s
+   ./incident.sh start mini-III
+   docker compose run --rm -e RESULT=mini-III k6 run -o experimental-prometheus-rw /scripts/open_model.js -e RATE=10 -e DURATION=20s
    ```
-2. Policz amplifikację (polecenie z ćw. 9, krok 4) i sprawdź statusy u dostawcy:
+2. Calculate the amplification (the command from ex. 9, step 4) and check the statuses at the provider:
    ```bash
    curl -s 127.0.0.1:8061/admin/stats | python -m json.tool | head -20
    ```
    Prometheus: `sum(increase(llm_http_attempts_total[2m])) / sum(increase(app_requests_total{endpoint="summary"}[2m]))`.
-   U mnie: k6 177 × 200 + 24 × 502, p99 6.3 s; `/diag`: **625 prób HTTP na 201 żądań = 3.11**; atrapa
-   177 × 200 i **448 × 529**; `/diag` → `klienci.krotkie`: `max_retries` 2, read 600 s. `check.py ex09`:
-   FAIL „×2.40 (529: 143)”.
-3. Odpowiedz bez kodu: ile prób HTTP na żądanie? Ile z nich to 529? Która warstwa ponawia (sprawdź
-   `/diag` → `klienci`) i czy ponowienia coś ratują?
-4. `python check.py ex09` — FAIL na incydencie. Potem `./incydent.sh stop`.
+   In my run: k6 177 × 200 + 24 × 502, p99 6.3 s; `/diag`: **625 HTTP attempts for 201 requests = 3.11**;
+   mock 177 × 200 and **448 × 529**; `/diag` → `clients.short`: `max_retries` 2, read 600 s. `check.py ex09`:
+   FAIL "×2.40 (529: 143)".
+3. Answer without code: how many HTTP attempts per request? How many of them are 529s? Which layer retries
+   (check `/diag` → `clients`), and do the retries save anything?
+4. `python check.py ex09` — FAIL on the incident. Then `./incident.sh stop`.
 
-Odpowiedź: `solutions/pytania_odpowiedzi.md`, sekcja „Mini-incydenty”.
+Answer: `solutions/questions_answers.md`, the "Mini-incidents" section.
 
 ---
-Utknąłeś? `solutions/hints/ex11_hint1.md` → `hint2` → `hint3`. Gotowe rozwiązanie:
+Stuck? `solutions/hints/ex11_hint1.md` → `hint2` → `hint3`. A ready solution:
 `solutions/ex11_fallback.py` → `app/llm/fallback.py`.

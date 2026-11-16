@@ -1,16 +1,16 @@
-# Ćw. 08 — podpowiedź 3 (pseudokod)
+# Ex. 08 — hint 3 (pseudocode)
 
 ```python
-class Kubelek:          # limit/min, poziom, czas ostatniego uzupełnienia
-    def czas_do(n): ...  # ile sekund do n tokenów
-    def zabierz(n): ...
-    def synchronizuj(limit, pozostalo): ...  # poziom = min(poziom, pozostalo)
+class Bucket:          # limit/min, level, time of the last refill
+    def time_until(n): ...  # how many seconds until n tokens
+    def take(n): ...
+    def sync(limit, remaining): ...  # level = min(level, remaining)
 
-async def tempo(klasa, max_tokens):
-    async with _kolejnosc:                     # FIFO
+async def pace(request_class, max_tokens):
+    async with _order:                         # FIFO
         while True:
-            czekaj = max(_pauza_do - now(), RPM.czas_do(1), OTPM.czas_do(max_tokens))
-            if czekaj <= 0: RPM.zabierz(1); OTPM.zabierz(max_tokens); return
-            await asyncio.sleep(min(czekaj, 1.0))
+            wait_s = max(_paused_until - now(), RPM.time_until(1), OTPM.time_until(max_tokens))
+            if wait_s <= 0: RPM.take(1); OTPM.take(max_tokens); return
+            await asyncio.sleep(min(wait_s, 1.0))
 ```
-`python check.py ex08` (profil `limity`, 90 naraz → 429 ≤ 1%).
+`python check.py ex08` (the `limits` profile, 90 at once → 429 ≤ 1%).

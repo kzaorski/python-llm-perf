@@ -1,17 +1,17 @@
-# Ćw. 10 — podpowiedź 3 (pseudokod)
+# Ex. 10 — hint 3 (pseudocode)
 
 ```python
-async def z_deadlinem(request, klasa, fn):
-    praca = asyncio.ensure_future(fn())
-    straz = asyncio.ensure_future(_czekaj_na_rozlaczenie(request)) if request else None
+async def with_deadline(request, request_class, fn):
+    work = asyncio.ensure_future(fn())
+    guard = asyncio.ensure_future(_wait_for_disconnect(request)) if request else None
     try:
-        async with asyncio.timeout(DEADLINE_S[klasa]):
-            await asyncio.wait({praca} | ({straz} if straz else set()), return_when=FIRST_COMPLETED)
+        async with asyncio.timeout(DEADLINE_S[request_class]):
+            await asyncio.wait({work} | ({guard} if guard else set()), return_when=FIRST_COMPLETED)
     except TimeoutError:
-        praca.cancel(); await suppress(praca); raise Przeterminowane(...)
+        work.cancel(); await suppress(work); raise DeadlineExceeded(...)
     finally:
-        if straz: straz.cancel()
-    if praca.done(): return praca.result()
-    praca.cancel(); await suppress(praca); raise Anulowane()
+        if guard: guard.cancel()
+    if work.done(): return work.result()
+    work.cancel(); await suppress(work); raise ClientDisconnected()
 ```
-Plus w `klient.py`: długie przez `messages.stream(...)` (TTFT z pierwszego zdarzenia). `python check.py ex10`.
+Plus in `client.py`: long calls through `messages.stream(...)` (TTFT from the first event). `python check.py ex10`.

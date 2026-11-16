@@ -1,88 +1,94 @@
-# Ćwiczenie 8: Limity dostawcy — 429, nagłówki `anthropic-ratelimit-*` i limiter po naszej stronie
+# Exercise 8: Provider limits — 429, `anthropic-ratelimit-*` headers and a limiter on our side
 
-> Czas: ~45 min (dwa przebiegi po 60 s; drugi opróżnia kolejkę ~1 min po końcu dopływu)
+> Time: ~45 min (two runs of 60 s; the second drains the queue ~1 min after the end of inflow)
 
-> Blok III — Dostawca: limity, ponowienia, timeouty, fallback (ćw. 8–11). Najpierw czytanka
-> `08a-limity-retry-timeouty.md`.
+> Block III — The provider: limits, retries, timeouts, fallback (ex. 8–11). Read
+> `08a-limits-retries-timeouts.md` first.
 
-## Cel
-Przełączasz atrapę na profil `limity` (limity konta jak u prawdziwego dostawcy: żądania/min, tokeny
-wejścia/min, tokeny wyjścia/min) i puszczasz ruch powyżej limitu. Liczysz 429 u dostawcy, czytasz
-nagłówki limitów i dopisujesz limiter tempa, który zamienia lawinę 429 w kontrolowane czekanie po
-naszej stronie. Zobaczysz też, czego limiter NIE naprawi: przepustowości.
+## Goal
+You switch the mock to the `limits` profile (account limits like a real provider's: requests/min, input
+tokens/min, output tokens/min) and send traffic above the limit. You count the 429s at the provider, read
+the limit headers, and add a rate limiter that turns an avalanche of 429s into controlled waiting on our
+side. You will also see what the limiter does NOT fix: throughput.
 
-## Teoria w pigułce
-- **Limity dostawcy LLM** — kubełki żetonów uzupełniane ciągle: RPM (żądania/min), ITPM (tokeny
-  wejścia/min), OTPM (tokeny wyjścia/min; dostawca rezerwuje `max_tokens` na starcie wywołania). Przekroczenie
-  któregokolwiek → `429 rate_limit_error` + `retry-after`. Pułapka: przy krótkich promptach i dużym
-  `max_tokens` wąskim gardłem jest OTPM, nie RPM.
-- **Nagłówki** — każda odpowiedź niesie `anthropic-ratelimit-{requests,input-tokens,output-tokens}-{limit,remaining,reset}`.
-  Po co: klient zna limit i stan kubełka, zanim dostanie 429. Pułapka: odpowiedź bez strumienia niesie
-  nagłówki dopiero po całej generacji — nie czekaj na nie, zanim wyślesz pierwsze żądanie.
-- **Limiter po stronie klienta** — własny kubełek (token bucket) zsynchronizowany z nagłówkami;
-  przed wywołaniem czekasz na żeton, po 429 wstrzymujesz wszystkich do `retry-after`. Po co: 429 to
-  zmarnowane połączenie i (przy ponowieniach) mnożenie ruchu. Pułapka: limiter nie zwiększa pojemności —
-  nadmiar nadal czeka, tylko u nas. Bez limitu tej kolejki (ćw. 12) czekanie rośnie bez końca.
-- **Dlaczego przy 4 slotach nie było 429?** Mała pula slotów sama w sobie była limiterem współbieżności.
-  Po ćw. 6 (32 sloty) aplikacja potrafi wreszcie przeciążyć dostawcę — kolejność ćwiczeń nie jest przypadkowa.
+## Theory in a nutshell
+- **LLM provider limits** — token buckets that refill continuously: RPM (requests/min), ITPM (input
+  tokens/min), OTPM (output tokens/min; the provider reserves `max_tokens` at the start of the call).
+  Exceeding any of them → `429 rate_limit_error` + `retry-after`. Pitfall: with short prompts and a large
+  `max_tokens`, the bottleneck is OTPM, not RPM.
+- **Headers** — every response carries `anthropic-ratelimit-{requests,input-tokens,output-tokens}-{limit,remaining,reset}`.
+  Why: the client knows the limit and the bucket state before it gets a 429. Pitfall: a non-streaming
+  response carries the headers only after the whole generation — do not wait for them before you send the
+  first request.
+- **A client-side limiter** — your own token bucket synchronized with the headers; before a call you wait
+  for a token, and after a 429 you hold everyone until `retry-after`. Why: a 429 is a wasted connection and
+  (with retries) a multiplication of traffic. Pitfall: the limiter does not increase capacity — the excess
+  still waits, just on our side. Without a bound on that queue (ex. 12) the wait grows without limit.
+- **Why were there no 429s with 4 slots?** The small slot pool was itself a concurrency limiter. After
+  ex. 6 (32 slots) the application can finally overload the provider — the order of the exercises is not
+  accidental.
 
-## Kroki
-1. Stan po ćw. 7, aplikacja na 8060 (32 sloty). Profil atrapy:
+## Steps
+1. State after ex. 7, application on 8060 (32 slots). Mock profile:
    ```bash
-   curl -s -X POST 127.0.0.1:8061/admin/profile/limity
-   curl -s -D - -o /dev/null -H 'x-api-key: mock-key' -H 'anthropic-version: 2023-06-01' -H 'content-type: application/json' \
+   curl -s -X POST 127.0.0.1:8061/admin/profile/limits
+   curl -s -D - -o /dev/null -H 'x-api-key: ***' -H 'anthropic-version: 2023-06-01' -H 'content-type: application/json' \
      -d '{"model":"claude-haiku-5-5","max_tokens":200,"messages":[{"role":"user","content":"test"}]}' \
      127.0.0.1:8061/v1/messages | grep -i ratelimit
    ```
-   U mnie: `requests-limit: 120`, `input-tokens-limit: 60000`, `output-tokens-limit: 12000`, po jednym
-   wywołaniu `output-tokens-remaining: 11800` (zarezerwowane `max_tokens` = 200), plus `*-reset`.
-2. **Rachunek i hipoteza.** Streszczenie ma `max_tokens=200`. Ile streszczeń/min przepuści limit tokenów
-   wyjścia? A RPM? Co się stanie przy ruchu 3/s przez 60 s (180 żądań)? Ile 429 zobaczy atrapa, ile błędów klient?
-3. Ruch:
+   In my run: `requests-limit: 120`, `input-tokens-limit: 60000`, `output-tokens-limit: 12000`, and after one
+   call `output-tokens-remaining: 11800` (the reserved `max_tokens` = 200), plus `*-reset`.
+2. **Calculation and hypothesis.** A summary has `max_tokens=200`. How many summaries/min will the output
+   token limit let through? And RPM? What happens with traffic of 3/s for 60 s (180 requests)? How many
+   429s will the mock see, and how many errors will the client get?
+3. Traffic:
    ```bash
-   docker compose run --rm -e WYNIK=ex08-przed k6 run -o experimental-prometheus-rw /scripts/otwarty.js -e RATE=3 -e CZAS=60s
+   docker compose run --rm -e RESULT=ex08-before k6 run -o experimental-prometheus-rw /scripts/open_model.js -e RATE=3 -e DURATION=60s
    curl -s 127.0.0.1:8061/admin/stats | python -m json.tool | head -20
    ```
-   U mnie: k6 172 × 200 + **9 × 503**, p99 6.3 s; atrapa: 174 × 200 i **129 × 429**.
-4. Prometheus — co widzi dostawca, a co aplikacja:
+   In my run: k6 172 × 200 + **9 × 503**, p99 6.3 s; mock: 174 × 200 and **129 × 429**.
+4. Prometheus — what the provider sees and what the application sees:
    ```
    sum by (status) (increase(mock_llm_requests_total{provider="a"}[3m]))
-   sum by (status) (increase(llm_http_responses_total{dostawca="a"}[3m]))
+   sum by (status) (increase(llm_http_responses_total{provider="a"}[3m]))
    ```
-   Klient dostał mniej błędów niż atrapa 429 — dlaczego? (Podpowiedź: kto ponawia, ćw. 9.)
-5. Otwórz **`app/llm/limiter.py`**: `tempo()` i `aktualizuj_z_naglowkow()` (`TODO ćw. 08`). Dopisz:
-   - dwa kubełki: żądania/min i tokeny wyjścia/min (rezerwujesz `max_tokens`), uzupełniane ciągle,
-   - `aktualizuj_z_naglowkow()`: z `*-limit` i `*-remaining` ustawiasz limit i korygujesz poziom w dół;
-     przy `status == 429` wstrzymujesz wszystkich do `retry-after`,
-   - `tempo()`: czekasz (FIFO, `asyncio.Lock`), aż oba kubełki mają żetony i minęła pauza; dopóki nie
-     znasz limitów (pierwsze odpowiedzi) — nie ograniczasz (pierwszą falę trzyma pula slotów).
-6. Restart aplikacji, ponownie `curl -s -X POST 127.0.0.1:8061/admin/profile/limity` (profil ustawia też
-   pełne kubełki limitów), powtórka kroku 3 z `-e WYNIK=ex08-po`. U mnie: atrapa **0 × 429** (167 × 200),
-   k6 165 × 200 bez błędów, ale czekanie na slot p90 36.5 / p99 **44.1 s** i test 106 s przy 60 s dopływu;
-   k6 pominął 16 iteracji (`dropped_iterations` — VU czekały w kolejce limitera; licz je jako nadmiar).
+   The client got fewer errors than the mock returned 429s — why? (Hint: who retries, ex. 9.)
+5. Open **`app/llm/limiter.py`**: `pace()` and `update_from_headers()` (`TODO ex. 08`). Add:
+   - two buckets: requests/min and output tokens/min (you reserve `max_tokens`), refilled continuously,
+   - `update_from_headers()`: from `*-limit` and `*-remaining` you set the limit and correct the level
+     downward; on `status == 429` you hold everyone until `retry-after`,
+   - `pace()`: you wait (FIFO, `asyncio.Lock`) until both buckets have tokens and the pause has elapsed;
+     until you know the limits (the first responses) — you do not throttle (the slot pool holds back the
+     first wave).
+6. Restart the application, run `curl -s -X POST 127.0.0.1:8061/admin/profile/limits` again (the profile
+   also sets the limit buckets to full), and repeat step 3 with `-e RESULT=ex08-after`. In my run: mock
+   **0 × 429** (167 × 200), k6 165 × 200 with no errors, but slot wait p90 36.5 / p99 **44.1 s** and a test
+   of 106 s with a 60 s inflow; k6 skipped 16 iterations (`dropped_iterations` — the VUs were waiting in the
+   limiter's queue; count them as excess).
 
-   U mnie (harness, 3/s × 60 s): **133 × 429** u atrapy i 7 żądań zakończonych `503 limit_dostawcy`,
-   p99 6.7 s → **0 × 429**, 180/180 OK, ale czekanie na slot p99 **58.2 s** — nadmiar czeka u nas.
-7. Zresetuj atrapę: `curl -s -X POST 127.0.0.1:8061/admin/reset` i `python check.py ex08`
-   (check sam ustawia profil `limity` i wysyła 90 żądań naraz).
+   In my run (harness, 3/s × 60 s): **133 × 429** at the mock and 7 requests ending with
+   `503 provider_rate_limited`, p99 6.7 s → **0 × 429**, 180/180 OK, but slot wait p99 **58.2 s** — the
+   excess waits on our side.
+7. Reset the mock: `curl -s -X POST 127.0.0.1:8061/admin/reset` and run `python check.py ex08`
+   (check sets the `limits` profile itself and sends 90 requests at once).
 
-## Kryteria „done”
-- [ ] Przy profilu `limity` atrapa nie zwraca 429 (≤ 1%), wszystkie żądania kończą się 200.
-- [ ] Umiesz policzyć z nagłówków, ile żądań danego typu przepuści limit na minutę.
-- [ ] Rozumiesz, dlaczego po naprawie p99 nadal jest długie i co z tym zrobi ćw. 12.
-- [ ] `python check.py ex08` przechodzi.
+## Definition of done
+- [ ] With the `limits` profile the mock does not return 429 (≤ 1%), and all requests end with 200.
+- [ ] You can calculate from the headers how many requests of a given type the limit lets through per minute.
+- [ ] You understand why p99 is still long after the fix and what ex. 12 will do about it.
+- [ ] `python check.py ex08` passes.
 
-## Pytania kontrolne
-1. Dlaczego limiter rezerwuje `max_tokens`, a nie faktyczną liczbę tokenów odpowiedzi?
-2. Dwa procesy aplikacji, każdy ze swoim kubełkiem. Co się stanie i jak pomagają nagłówki `*-remaining`?
-3. Po co wstrzymywać WSZYSTKICH po pierwszym 429, a nie tylko to jedno żądanie?
+## Review questions
+1. Why does the limiter reserve `max_tokens` instead of the actual number of response tokens?
+2. Two application processes, each with its own bucket. What happens, and how do the `*-remaining` headers help?
+3. Why hold EVERYONE after the first 429, and not just that one request?
 
-Odpowiedzi: `solutions/pytania_odpowiedzi.md`.
+Answers: `solutions/questions_answers.md`.
 
-## ★ Bonus (opcjonalnie)
-Dodaj trzeci kubełek: tokeny wejścia/min (ITPM), z liczbą tokenów oszacowaną z długości promptu.
-Zbuduj ruch, w którym to ITPM jest wąskim gardłem (długie zgłoszenia, `max_tokens` małe).
+## ★ Bonus (optional)
+Add a third bucket: input tokens/min (ITPM), with the number of tokens estimated from the prompt length.
+Build traffic in which ITPM is the bottleneck (long claims, small `max_tokens`).
 
 ---
-Utknąłeś? `solutions/hints/ex08_hint1.md` → `hint2` → `hint3`. Gotowe rozwiązanie:
-`solutions/ex08_limiter.py` → `app/llm/limiter.py` (zawiera ćw. 1 i 6).
+Stuck? `solutions/hints/ex08_hint1.md` → `hint2` → `hint3`. A ready solution:
+`solutions/ex08_limiter.py` → `app/llm/limiter.py` (includes ex. 1 and 6).

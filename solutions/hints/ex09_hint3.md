@@ -1,15 +1,15 @@
-# Ćw. 09 — podpowiedź 3 (pseudokod)
+# Ex. 09 — hint 3 (pseudocode)
 
 ```python
-async def z_ponowieniami(fn):
-    for proba in range(PROBY):
+async def with_retries(fn):
+    for attempt in range(ATTEMPTS):
         try:
             return await fn()
         except Exception as e:
-            if proba == PROBY - 1 or not _do_ponowienia(e) or not _budzet_pozwala():
+            if attempt == ATTEMPTS - 1 or not _should_retry(e) or not _budget_allows():
                 raise
-            _ponowienia.append(now())
-            await asyncio.sleep(_przerwa(e, proba))   # retry-after albo U(0, min(8, 0.5·2^p))
+            _retries.append(now())
+            await asyncio.sleep(_pause(e, attempt))   # retry-after or U(0, min(8, 0.5·2^p))
 ```
-`_do_ponowienia`: najpierw `if isinstance(e, (APITimeoutError, httpx2.TimeoutException)): return False`.
-`python check.py ex09` (≤ 1.5 próby na żądanie przy `przeciazenie`).
+`_should_retry`: first `if isinstance(e, (APITimeoutError, httpx2.TimeoutException)): return False`.
+`python check.py ex09` (≤ 1.5 attempts per request with `overload`).

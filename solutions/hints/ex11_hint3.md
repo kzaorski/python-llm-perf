@@ -1,17 +1,17 @@
-# Ćw. 11 — podpowiedź 3 (pseudokod)
+# Ex. 11 — hint 3 (pseudocode)
 
 ```python
-class Wylacznik:
-    def czy_pytac_a(self):
-        if self.stan == "zamkniety": return True
-        if self.stan == "otwarty" and now() >= self.otwarty_do: self._ustaw("polotwarty")
-        if self.stan == "polotwarty" and not self.probka_w_toku:
-            self.probka_w_toku = True; return True
+class CircuitBreaker:
+    def should_try_a(self):
+        if self.state == "closed": return True
+        if self.state == "open" and now() >= self.open_until: self._set_state("half_open")
+        if self.state == "half_open" and not self.probe_in_flight:
+            self.probe_in_flight = True; return True
         return False
-    def sukces(self): self.awarie = 0; self.probka_w_toku = False; self._ustaw("zamkniety")
-    def awaria(self):
-        self.awarie += 1; self.probka_w_toku = False
-        if self.stan == "polotwarty" or self.awarie >= PROG_AWARII:
-            self._ustaw("otwarty"); self.otwarty_do = now() + CZAS_OTWARCIA_S
+    def success(self): self.failures = 0; self.probe_in_flight = False; self._set_state("closed")
+    def failure(self):
+        self.failures += 1; self.probe_in_flight = False
+        if self.state == "half_open" or self.failures >= FAILURE_THRESHOLD:
+            self._set_state("open"); self.open_until = now() + OPEN_DURATION_S
 ```
-W funkcji wywołania: `if cb.czy_pytac_a(): try a → cb.sukces() / except → cb.awaria(), potem b`. `python check.py ex11`.
+In the invoke function: `if cb.should_try_a(): try a → cb.success() / except → cb.failure(), then b`. `python check.py ex11`.

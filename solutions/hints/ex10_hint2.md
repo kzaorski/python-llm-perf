@@ -1,9 +1,9 @@
-# Ćw. 10 — podpowiedź 2 (API / metryki)
+# Ex. 10 — hint 2 (API / metrics)
 
-- `anthropic.Timeout(connect=3, read=15, write=10, pool=5)` dla krótkich; długie: strumień, `read=60`,
-  `max_retries=0` (ping dostawcy co 15 s utrzymuje połączenie).
-- Deadline: `async with asyncio.timeout(DEADLINE_S[klasa])` wokół wywołania → `Przeterminowane` (504).
-- Rozłączenie: zadanie-strażnik `while not await request.is_disconnected(): await asyncio.sleep(0.5)`;
-  `asyncio.wait({praca, straz}, return_when=FIRST_COMPLETED)`; gdy pierwszy skończy strażnik — `praca.cancel()`.
-- Dowód: `sum by (phase) (increase(mock_llm_cancelled_total[10m]))`, `/admin/stats` (`generating`,
-  `oldest_inflight_s`), `/diag` → `klienci` (timeouty, `max_retries`). Aplikację uruchamiaj z `LLM_FALLBACK=0`.
+- `anthropic.Timeout(connect=3, read=15, write=10, pool=5)` for short; long: a stream, `read=60`,
+  `max_retries=0` (the provider's ping every 15 s keeps the connection alive).
+- Deadline: `async with asyncio.timeout(DEADLINE_S[request_class])` around the call → `DeadlineExceeded` (504).
+- Disconnect: a guard task `while not await request.is_disconnected(): await asyncio.sleep(0.5)`;
+  `asyncio.wait({work, guard}, return_when=FIRST_COMPLETED)`; when the guard finishes first — `work.cancel()`.
+- Evidence: `sum by (phase) (increase(mock_llm_cancelled_total[10m]))`, `/admin/stats` (`generating`,
+  `oldest_inflight_s`), `/diag` → `clients` (timeouts, `max_retries`). Start the application with `LLM_FALLBACK=0`.

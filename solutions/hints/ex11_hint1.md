@@ -1,5 +1,5 @@
-# Ćw. 11 — podpowiedź 1 (kierunek)
+# Ex. 11 — hint 1 (direction)
 
-Gdy dostawca `a` milczy, każde żądanie najpierw czeka na jego timeout, a dopiero potem idzie do `b`.
-Potrzebujesz pamięci: „`a` ostatnio zawodzi — przez chwilę nie pytaj go wcale”, a co jakiś czas jedno
-żądanie-próbka sprawdza, czy wrócił. To wyłącznik (circuit breaker) z trzema stanami.
+When provider `a` is silent, every request first waits for its timeout and only then goes to `b`. You need
+memory: "`a` has been failing lately — do not ask it at all for a while", and every so often a single probe
+request checks whether it is back. That is a circuit breaker with three states.

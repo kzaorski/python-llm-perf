@@ -1,5 +1,6 @@
-# Ćw. 08 — podpowiedź 1 (kierunek)
+# Ex. 08 — hint 1 (direction)
 
-Dostawca mówi, ile Ci zostało: nagłówki `anthropic-ratelimit-*-remaining` / `-limit` / `-reset` w każdej
-odpowiedzi i `retry-after` przy 429. Zamiast zbierać 429 i ponawiać, poczekaj **u siebie**, zanim wyślesz
-wywołanie, na które limitu i tak nie ma. To limiter tempa (token bucket), obok semafora współbieżności.
+The provider tells you how much you have left: the `anthropic-ratelimit-*-remaining` / `-limit` / `-reset`
+headers in every response and `retry-after` on a 429. Instead of collecting 429s and retrying, wait
+**on your side**, before you send a call that has no chance of fitting under the limit anyway. That is a
+rate limiter (a token bucket), next to the concurrency semaphore.

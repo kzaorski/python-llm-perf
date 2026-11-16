@@ -1,142 +1,149 @@
-# Ćwiczenie 10: Timeouty, deadline i anulowanie — wywołania, które trwają minutami
+# Exercise 10: Timeouts, deadlines and cancellation — calls that last minutes
 
-> Czas: ~80 min, w tym ~15 min testów wielominutowych (każdy scenariusz 1–5 min, przed i po naprawie)
+> Time: ~80 min, including ~15 min of multi-minute tests (each scenario takes 1–5 min, before and after the fix)
 
-> Blok III. Czytanka `08a-limity-retry-timeouty.md` (timeout per operacja vs deadline całkowity,
-> wolny pierwszy token, anulowanie); `00-teoria.md` „Wywołania wielominutowe”.
+> Block III. Reading `08a-limits-retries-timeouts.md` (per-operation timeout vs total deadline,
+> slow first token, cancellation); `00-theory.md` "Multi-minute calls".
 
-## Cel
-Analiza dokumentacji szkody (`POST /claims/{n}/analysis`, klasa „długie”) trwa u dostawcy 60–300 s.
-Sprawdzasz trzy rzeczy, które przy takich wywołaniach psują się po cichu: (1) timeout krótszy niż
-oczekiwany czas odpowiedzi + ponowienia SDK, (2) brak anulowania, gdy klient zrezygnuje, (3) brak
-sensownego timeoutu dla krótkich, gdy dostawca zawiśnie. Każdy scenariusz puszczasz naprawdę —
-kilka minut zegara — i patrzysz, co w tym czasie dzieje się ze slotami, z kolejką i u dostawcy.
+## Goal
+The claim file analysis (`POST /claims/{n}/analysis`, the "long" class) takes 60–300 s at the provider.
+You check three things that quietly break with calls like these: (1) a timeout shorter than the expected
+response time plus SDK retries, (2) no cancellation when the client gives up, (3) no sensible timeout for
+short requests when the provider hangs. You run every scenario for real — several minutes of wall-clock
+time — and watch what happens in the meantime to the slots, the queue and the provider.
 
-## Teoria w pigułce
-- **Timeout SDK to limity PER OPERACJA, nie czas całkowity.** `timeout=60` w kliencie anthropic/httpx2
-  to: połączenie ≤ 60 s, KAŻDY odczyt ≤ 60 s itd. Odczyt resetuje zegar — strumień 150 s przy
-  `read=30 s` kończy się poprawnie. Pułapka: „timeout 60 s” nie gwarantuje, że żądanie skończy się w 60 s.
-- **Bez strumienia read = czas do CAŁEJ odpowiedzi.** Wywołanie non-stream milczy, aż dostawca skończy
-  generować. Analiza 120 s przy `read=60` zawsze kończy się timeoutem — a SDK z `max_retries=2` ponawia
-  ją dwa razy: użytkownik czeka ~3 × 60 s na błąd, dostawca zaczyna 3 generacje (koszt ×3).
-- **Strumień + ping** — przy strumieniu read timeout staje się limitem BEZCZYNNOŚCI między zdarzeniami
-  (tokeny albo `ping`, które dostawca wysyła w ciszy co ~15 s). Pułapka: timeout W TRAKCIE strumienia
-  to surowy `httpx2.ReadTimeout`, nie `anthropic.APITimeoutError` — `except APITimeoutError` go nie złapie.
-- **Deadline całkowity** — `asyncio.timeout(...)` wokół całej pracy w aplikacji; po przekroczeniu
-  zadanie jest anulowane, połączenie z dostawcą zamknięte, a dostawca przerywa generację. To jedyne
-  miejsce, gdzie ustalasz „najdłużej X sekund”.
-- **Anulowanie po rozłączeniu** — gdy klient (przeglądarka, proxy, k6) zrezygnuje, praca dla niego to
-  czysta strata: slot semafora, slot u dostawcy, tokeny. Trzeba to wykryć (`request.is_disconnected()`)
-  i anulować wywołanie. Pułapka: middleware `@app.middleware("http")` (BaseHTTPMiddleware) w Starlette
-  psuje wykrywanie rozłączenia — aplikacja kursu ma middleware napisane jako czyste ASGI.
-- **Łańcuch timeoutów** — klient zewnętrzny > deadline aplikacji > timeouty SDK. k6 ma domyślnie 60 s
-  na żądanie (skrypty kursu ustawiają więcej), gunicorn `-k sync` 30 s (ćw. 7). Celowo krótki timeout
-  powinien dawać czytelny objaw (504 z przyczyną), a nie przypadkowo unieważniać test.
+## Theory in a nutshell
+- **An SDK timeout is a set of PER-OPERATION limits, not a total time.** `timeout=60` in the anthropic/httpx2
+  client means: connect ≤ 60 s, EACH read ≤ 60 s, and so on. A read resets the clock — a 150 s stream with
+  `read=30 s` completes correctly. Pitfall: "a 60 s timeout" does not guarantee that the request finishes
+  in 60 s.
+- **Without a stream, read = the time to the WHOLE response.** A non-streaming call stays silent until the
+  provider finishes generating. A 120 s analysis with `read=60` always ends in a timeout — and an SDK with
+  `max_retries=2` retries it twice: the user waits ~3 × 60 s for an error, and the provider starts 3
+  generations (cost ×3).
+- **Stream + ping** — with a stream the read timeout becomes an IDLE limit between events (tokens, or
+  `ping`s that the provider sends during silence every ~15 s). Pitfall: a timeout IN THE MIDDLE of a stream
+  is a raw `httpx2.ReadTimeout`, not `anthropic.APITimeoutError` — `except APITimeoutError` will not catch it.
+- **The total deadline** — `asyncio.timeout(...)` around all the work in the application; after it expires
+  the task is cancelled, the connection to the provider is closed, and the provider aborts the generation.
+  It is the only place where you set "at most X seconds".
+- **Cancellation on disconnect** — when the client (a browser, a proxy, k6) gives up, work done for it is
+  pure waste: a semaphore slot, a slot at the provider, tokens. You have to detect it
+  (`request.is_disconnected()`) and cancel the call. Pitfall: the `@app.middleware("http")` middleware
+  (BaseHTTPMiddleware) in Starlette breaks disconnect detection — the course application has its middleware
+  written as pure ASGI.
+- **The timeout chain** — outer client > application deadline > SDK timeouts. k6 defaults to 60 s per
+  request (the course scripts set more), gunicorn `-k sync` to 30 s (ex. 7). A deliberately short timeout
+  should give a clear symptom (a 504 with a cause), not accidentally invalidate the test.
 
-## Kroki
-**Przygotowanie.** W tym ćwiczeniu uruchamiaj aplikację z wyłączonym zapasowym dostawcą — inaczej
-zawieszenie `a` dubluje się na `b` i liczby są nieczytelne (fallback to ćw. 11):
+## Steps
+**Preparation.** In this exercise, run the application with the fallback provider turned off — otherwise a
+hang at `a` is duplicated at `b` and the numbers are unreadable (fallback is ex. 11):
 ```bash
 LLM_FALLBACK=0 uvicorn app.main:app --port 8060
 ```
-Obserwuj w trakcie każdego testu (Grafana → Prometheus, odświeżanie 5 s):
+Watch during every test (Grafana → Prometheus, 5 s refresh):
 ```
 max_over_time(mock_llm_generating{provider="a"}[10m])
 sum by (phase) (increase(mock_llm_cancelled_total[10m]))
 max_over_time(mock_llm_oldest_inflight_seconds[10m])
 ```
-albo w terminalu (Ctrl+C kończy):
+or in the terminal (Ctrl+C stops it):
 ```bash
 while true; do curl -s 127.0.0.1:8061/admin/stats | python -c "import json,sys; a=json.load(sys.stdin)['a']; print(a['generating'], a['waiting'], a['oldest_inflight_s'], a['responses'])"; sleep 2; done
 ```
 
-### A. Analiza dłuższa niż timeout (W17) — ~3 min przed, ~2 min po
-1. Zajrzyj do `curl -s 127.0.0.1:8060/diag | python -m json.tool` → `klienci.dlugie`: `max_retries` i `timeout`.
-2. Dostawca: 90 s ciszy przed pierwszym tokenem, potem 30 s generacji; w ciszy wysyła `ping` co 15 s:
+### A. An analysis longer than the timeout (F17) — ~3 min before, ~2 min after
+1. Look at `curl -s 127.0.0.1:8060/diag | python -m json.tool` → `clients.long`: `max_retries` and `timeout`.
+2. The provider: 90 s of silence before the first token, then 30 s of generation; during the silence it
+   sends a `ping` every 15 s:
    ```bash
    curl -s -X PATCH '127.0.0.1:8061/admin/config?provider=a' -H 'content-type: application/json' \
      -d '{"early_start": true, "ping_interval_s": 15}'
    ```
-3. **Hipoteza:** 4 analizy naraz. Kiedy i z jakim statusem skończy się każda? Ile generacji zacznie dostawca?
+3. **Hypothesis:** 4 analyses at once. When and with what status will each one end? How many generations
+   will the provider start?
    ```bash
-   python scripts/pomiar.py ex10-dlugie -- run /scripts/dlugie.js -e N=4 -e TTFT_MS=90000 -e TOTAL_S=30
+   python scripts/measure.py ex10-long -- run /scripts/long.js -e N=4 -e TTFT_MS=90000 -e TOTAL_S=30
    ```
-   `scripts/pomiar.py` uruchamia k6 i co 2 s próbkuje `/diag` i atrapę; na końcu wypisuje przyrost
-   odpowiedzi atrapy (`cancelled_*` = generacje porzucone). U mnie: **4 × 504 po 181.6–191.6 s**
-   (3 × timeout 60 s — SDK ponawia), **10 porzuconych generacji** u atrapy.
+   `scripts/measure.py` runs k6 and samples `/diag` and the mock every 2 s; at the end it prints the growth
+   of the mock's responses (`cancelled_*` = abandoned generations). In my run: **4 × 504 after
+   181.6–191.6 s** (3 × the 60 s timeout — the SDK retries), **10 abandoned generations** at the mock.
 
-### B. Klient rezygnuje (W16) — ~3 min przed, ~30 s po
-4. **Hipoteza:** 6 analiz po 150 s generacji, ale klient (k6) rezygnuje po 20 s. Co stanie się
-   z generacjami u dostawcy po rozłączeniu? Kiedy zwolnią się sloty?
+### B. The client gives up (F16) — ~3 min before, ~30 s after
+4. **Hypothesis:** 6 analyses with 150 s of generation each, but the client (k6) gives up after 20 s. What
+   will happen to the generations at the provider after the disconnect? When will the slots be freed?
    ```bash
-   python scripts/pomiar.py ex10-rozlaczenie -- run /scripts/dlugie.js -e N=6 -e TOTAL_S=150 -e TTFT_MS=2000 -e K6_TIMEOUT=20s
+   python scripts/measure.py ex10-disconnect -- run /scripts/long.js -e N=6 -e TOTAL_S=150 -e TTFT_MS=2000 -e K6_TIMEOUT=20s
    ```
-   W trakcie patrz na `generating` atrapy. U mnie: atrapa generuje dalej „do nikogo” — sloty u dostawcy
-   wolne dopiero **172.9 s** po rozłączeniu; **18 porzuconych generacji** (każda analiza 3× — po timeoucie
-   60 s SDK ponawia, mimo że klienta dawno nie ma).
+   During the run, watch the mock's `generating`. In my run: the mock keeps generating with nobody waiting
+   for the result — the provider-side slots are free only **172.9 s** after the disconnect; **18 abandoned
+   generations** (every analysis 3× — after the 60 s timeout the SDK retries, although the client is long
+   gone).
 
-### C. Zawieszony dostawca, krótkie żądania (W6) — ~4.5 min przed, ~1 min po
-5. **Hipoteza:** dostawca milczy 120 s na każdym streszczeniu (domyślny read SDK = 600 s). Ruch 2/s przez
-   30 s. Ile slotów zajmą zawieszone wywołania? Kiedy przyjdzie ostatnia odpowiedź?
+### C. A hung provider, short requests (F6) — ~4.5 min before, ~1 min after
+5. **Hypothesis:** the provider is silent for 120 s on every summary (the SDK's default read = 600 s).
+   Traffic of 2/s for 30 s. How many slots will the hung calls occupy? When will the last response arrive?
    ```bash
-   for i in $(seq 60); do curl -s -o /dev/null -w '%{http_code} %{time_total}\n' -X POST -H 'x-mock-ttft-ms: 120000' 127.0.0.1:8060/claims/$i/summary & sleep 0.5; done > w6.txt
-   curl -s 127.0.0.1:8060/diag | python -m json.tool | head -12      # po ~30 s: sloty, kolejka
-   wait; sort -k2 -n w6.txt | tail -3
+   for i in $(seq 60); do curl -s -o /dev/null -w '%{http_code} %{time_total}\n' -X POST -H 'x-mock-ttft-ms: 120000' 127.0.0.1:8060/claims/$i/summary & sleep 0.5; done > f6.txt
+   curl -s 127.0.0.1:8060/diag | python -m json.tool | head -12      # after ~30 s: slots, queue
+   wait; sort -k2 -n f6.txt | tail -3
    ```
-   U mnie (dokładnie te polecenia): po ~30 s `/diag` → `krotkie`: **32 w toku, 28 czeka**, najstarsze 23.5 s;
-   60 × 200 po 120.3–220.8 s (p50 120.8 s), ostatnia **po 258 s** od startu pętli; atrapa: 32 generacje naraz,
-   `mock_llm_cancelled_total` bez przyrostu.
+   In my run (exactly these commands): after ~30 s `/diag` → `queue.short`: **32 in flight, 28 waiting**,
+   the oldest 23.5 s; 60 × 200 after 120.3–220.8 s (p50 120.8 s), the last one **258 s** after the loop
+   started; mock: 32 generations at once, `mock_llm_cancelled_total` with no increase.
 
-### Naprawa
-6. **`app/llm/klient.py`** — timeouty z SLO, nie „na zapas”:
-   - krótkie: `anthropic.Timeout(connect=3, read=15, write=10, pool=5)`, `max_retries=0` (z ćw. 9);
-   - długie: wywołanie **strumieniem** (`messages.stream`, zbierasz tekst, mierzysz TTFT), `read=60`
-     (bezczynność — ping co 15 s ją resetuje), `max_retries=0` — powtórka 4-minutowej generacji to podwójny
-     koszt; o ponowieniu decyduje aplikacja.
-7. **`app/llm/wywolanie.py`** (`TODO ćw. 10`) — `z_deadlinem()`: deadline per klasa
-   (`asyncio.timeout`, krótkie 30 s, długie 330 s → `bledy.Przeterminowane`) i strażnik rozłączenia
-   (co 0.5 s `request.is_disconnected()` → anuluj pracę → `bledy.Anulowane`). `request` bywa `None`
-   (worker kolejki, wsady).
-8. Restart (`LLM_FALLBACK=0`) i powtórka A, B, C (przed A znów `PATCH … early_start/ping`).
-   U mnie, powtórka C dokładnie poleceniem z kroku 5: **60 × 504 po 15.0–15.1 s**, ostatnia po 54 s od startu
-   pętli (30 s wysyłania + 15 s + narzut curl); atrapa: **59 × `cancelled_generating`** (60. przerwana chwilę
-   później); `/diag` → `klienci`: krótkie `max_retries` 0, read 15 s; długie `max_retries` 0, read 60 s.
-   Powtórka A: **4 × 200 po 122.2 s**, atrapa 4 × 200, 0 porzuconych. Powtórka B: k6 rezygnuje po 20.0 s, a
-   `generating` u atrapy spada z 6 do **0** w próbce 2 s później (`pomiar.py` próbkuje co ~2 s);
-   **6 × `cancelled_generating`**.
+### The fix
+6. **`app/llm/client.py`** — timeouts from the SLO, not "just in case":
+   - short: `anthropic.Timeout(connect=3, read=15, write=10, pool=5)`, `max_retries=0` (from ex. 9);
+   - long: a call **with a stream** (`messages.stream`, you collect the text and measure TTFT), `read=60`
+     (idle — a ping every 15 s resets it), `max_retries=0` — repeating a 4-minute generation is a double
+     cost; the application decides about retrying.
+7. **`app/llm/call.py`** (`TODO ex. 10`) — `with_deadline()`: a deadline per class (`asyncio.timeout`, short
+   30 s, long 330 s → `errors.DeadlineExceeded`) and a disconnect guard (every 0.5 s
+   `request.is_disconnected()` → cancel the work → `errors.ClientDisconnected`). `request` can be `None`
+   (a queue worker, batches).
+8. Restart (`LLM_FALLBACK=0`) and repeat A, B, C (before A, run the `PATCH … early_start/ping` again).
+   In my run, repeating C with exactly the command from step 5: **60 × 504 after 15.0–15.1 s**, the last one
+   54 s after the loop started (30 s of sending + 15 s + curl overhead); mock: **59 × `cancelled_generating`**
+   (the 60th aborted a moment later); `/diag` → `clients`: short `max_retries` 0, read 15 s; long
+   `max_retries` 0, read 60 s. Repeating A: **4 × 200 after 122.2 s**, mock 4 × 200, 0 abandoned. Repeating
+   B: k6 gives up after 20.0 s, and the mock's `generating` drops from 6 to **0** in the sample 2 s later
+   (`measure.py` samples every ~2 s); **6 × `cancelled_generating`**.
 
-   U mnie:
+   In my run:
 
-   | Scenariusz | Przed | Po |
+   | Scenario | Before | After |
    |---|---|---|
-   | A: 4 analizy, 90 s ciszy + 30 s | 4 × 504 po 181.6–191.6 s, 10 porzuconych generacji | **4 × 200 po 122.0 s**, 0 porzuconych |
-   | B: 6 × 150 s, klient odchodzi po 20 s | sloty u dostawcy wolne po 172.9 s, 18 porzuconych | wolne po **0.7 s**, 6 anulowanych (`cancelled_generating`) |
-   | C: cisza 120 s, 2/s × 30 s | 60 × 200 dopiero po 120–235 s; 32/32 sloty zajęte, 28 czeka; ostatnia po 254 s | 60 × **504** `timeout_dostawcy` po 15–25 s, ostatnia po 44.5 s |
+   | A: 4 analyses, 90 s of silence + 30 s | 4 × 504 after 181.6–191.6 s, 10 abandoned generations | **4 × 200 after 122.0 s**, 0 abandoned |
+   | B: 6 × 150 s, the client leaves after 20 s | provider-side slots free after 172.9 s, 18 abandoned | free after **0.7 s**, 6 cancelled (`cancelled_generating`) |
+   | C: 120 s of silence, 2/s × 30 s | 60 × 200 only after 120–235 s; 32/32 slots busy, 28 waiting; the last one after 254 s | 60 × **504** `provider_timeout` after 15–25 s, the last one after 44.5 s |
 
-9. Zresetuj atrapę (`curl -s -X POST 127.0.0.1:8061/admin/reset`), zostaw aplikację z `LLM_FALLBACK=0`
-   i `python check.py ex10` (krótkie zawieszenie → 504 < 36 s; rozłączenie → generacja przerwana w 4 s;
-   `max_retries=0` dla długich).
+9. Reset the mock (`curl -s -X POST 127.0.0.1:8061/admin/reset`), leave the application with
+   `LLM_FALLBACK=0` and run `python check.py ex10` (a short hang → 504 < 36 s; a disconnect → the
+   generation aborted within 4 s; `max_retries=0` for long).
 
-## Kryteria „done”
-- [ ] Analiza 90 s ciszy + 30 s kończy się 200, bez porzuconych generacji.
-- [ ] Rozłączenie klienta zwalnia slot u dostawcy w sekundach (`cancelled_generating` rośnie).
-- [ ] Zawieszony dostawca daje krótkim szybkie 504 z przyczyną, zamiast trzymać sloty minutami.
-- [ ] Umiesz narysować łańcuch: timeout k6 > deadline aplikacji > read timeout SDK (i dlaczego w tej kolejności).
-- [ ] `python check.py ex10` przechodzi.
+## Definition of done
+- [ ] An analysis with 90 s of silence + 30 s ends with a 200, with no abandoned generations.
+- [ ] A client disconnect frees the provider-side slot within seconds (`cancelled_generating` grows).
+- [ ] A hung provider gives short requests a fast 504 with a cause, instead of holding slots for minutes.
+- [ ] You can draw the chain: k6 timeout > application deadline > SDK read timeout (and why in that order).
+- [ ] `python check.py ex10` passes.
 
-## Pytania kontrolne
-1. Ustawiłeś klientowi długich `timeout=330`. Dlaczego to nie jest deadline 330 s?
-2. W pomiarze z tabeli (scenariusz C po naprawie) odpowiedzi przychodziły po 15–25 s, choć read timeout to 15 s
-   (w moim powtórzeniu poleceniem z kroku 5 — równo po 15.0 s). Skąd mogą pochodzić dodatkowe sekundy i od
-   czego zależy, czy się pojawią?
-3. Dlaczego wyjątek timeoutu w trakcie strumienia trzeba łapać osobno i jak to wpływa na ponowienia z ćw. 9?
+## Review questions
+1. You set `timeout=330` on the long client. Why is this not a 330 s deadline?
+2. In the table's measurement (scenario C after the fix) responses arrived after 15–25 s, although the read
+   timeout is 15 s (in my repeat with the command from step 5 — exactly 15.0 s). Where can the extra
+   seconds come from, and what determines whether they appear?
+3. Why does the timeout exception in the middle of a stream have to be caught separately, and how does it
+   affect the retries from ex. 9?
 
-Odpowiedzi: `solutions/pytania_odpowiedzi.md`.
+Answers: `solutions/questions_answers.md`.
 
-## ★ Bonus (opcjonalnie)
-Profil `pauzy` (`curl -X POST 127.0.0.1:8061/admin/profile/pauzy`): 20 s przerwy w środku strumienia.
-Przy jakim `read` wywołanie przeżywa pauzę bez pingów? Co by się stało z `read=15`?
+## ★ Bonus (optional)
+The `pauses` profile (`curl -X POST 127.0.0.1:8061/admin/profile/pauses`): a 20 s pause in the middle of
+the stream. At what `read` does the call survive the pause without pings? What would happen with `read=15`?
 
 ---
-Utknąłeś? `solutions/hints/ex10_hint1.md` → `hint2` → `hint3`. Gotowe rozwiązanie:
-`solutions/ex10_klient.py` → `app/llm/klient.py` (zawiera ćw. 9) i `solutions/ex10_wywolanie.py` → `app/llm/wywolanie.py`.
+Stuck? `solutions/hints/ex10_hint1.md` → `hint2` → `hint3`. A ready solution:
+`solutions/ex10_client.py` → `app/llm/client.py` (includes ex. 9) and `solutions/ex10_call.py` → `app/llm/call.py`.
