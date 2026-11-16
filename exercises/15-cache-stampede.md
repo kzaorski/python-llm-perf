@@ -23,10 +23,10 @@ key expires. You measure the stampede by the number of LLM calls and fix it with
 ## Steps
 1. State after ex. 14, application on 8060. One question, twice:
    ```bash
-   curl -s "127.0.0.1:8060/faq?q=how-long-does-settlement-take" | head -c 150; echo
-   curl -s "127.0.0.1:8060/faq?q=how-long-does-settlement-take" | head -c 150; echo
+   curl -s "127.0.0.1:8060/faq?q=how-long-does-settlement-take" | tail -c 40; echo
+   curl -s "127.0.0.1:8060/faq?q=how-long-does-settlement-take" | tail -c 40; echo
    ```
-   The `cache` field: `miss`, then `hit`.
+   The `cache` field (the last one in the JSON, hence `tail`): `miss`, then `hit`. (If the question was asked earlier and the entry has not expired yet, you will see `hit` twice — use a different question or wait for the TTL.)
 2. **Hypothesis:** 50 clients ask about the same NEW question at the same time. How many LLM calls will the mock see?
 3. Measurement — the number of 200 responses at the mock before and after (both "providers", because after ex. 11 traffic may go to `b`):
    ```bash

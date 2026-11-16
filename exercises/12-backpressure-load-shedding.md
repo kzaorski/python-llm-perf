@@ -79,6 +79,9 @@ class, a queue limit, and a wait budget (a fast 503 with `Retry-After`).
 
    A → C: separate pools remove the head-of-line blocking. C → B: the limit and the budget turn 30
    abandonments after minutes (wasted work) into 42 fast refusals with `Retry-After`; drain 402 → 213 s.
+   (Run-to-run variance: when repeating the three runs I got drains of 342 / 402 / 235 s for A / C / B and a
+   handful of `status 0` in k6 — the Docker network `dial: i/o timeout` from the README, not application
+   responses. The ordering of the variants and the 30 OK + 42 × 503 split in B were the same in my repeat.)
 8. **Quick preview (optional, does NOT replace the multi-minute run):** the same traffic shape at a
    shorter scale — useful when you only want to check that the code works:
    ```bash
