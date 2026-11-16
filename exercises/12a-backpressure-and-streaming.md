@@ -1,264 +1,234 @@
-# 12a. Czytanka: backpressure, odrzucanie nadmiaru i streaming
+# 12a. Reading: backpressure, load shedding and streaming
 
-Czytanka, nie ćwiczenie — bez zadań i kryteriów „done”. Cel: zrozumieć, co
-system powinien robić, **gdy dopływ przekracza pojemność** — i dlaczego „niech
-czekają” jest najgorszą z odpowiedzi przy wywołaniach trwających minuty. Druga
-część: streaming odpowiedzi (SSE), czyli jak mierzyć to, co użytkownik
-naprawdę czuje — czas do pierwszego fragmentu. Każde pojęcie w schemacie:
+A reading, not an exercise — no tasks and no definition of done. The goal is to understand what a
+system should do **when the arrival rate exceeds capacity** — and why "let them wait" is the worst
+possible answer when calls last minutes. The second part covers response streaming (SSE), that is,
+how to measure what the user actually feels — the time to the first chunk. Every concept follows the
+same pattern:
 
-> **Definicja** → **Intuicja/analogia** → **Po co to** → **Częsta pomyłka**
+> **Definition** → **Intuition/analogy** → **Why it matters** → **Common mistake**
 
-Wracaj tu, gdy coś przestanie się spinać. Krótkie definicje są w `slownik.md`.
+Come back here when things stop adding up. Short definitions are in `glossary.md`.
 
 ---
 
 ## Backpressure
 
-**Definicja.** **Backpressure** (przeciwciśnienie) to mechanizm, którym
-przeciążona stacja **sygnalizuje nadawcy**, że ma zwolnić. Przy λ > X_max
-(00-teoria) system ma tylko trzy wyjścia:
-1. **Kolejkować bez limitu** — przyjąć wszystko, czas czekania rośnie bez
-   końca, pamięć też (to *brak* backpressure).
-2. **Blokować nadawcę** — nie przyjmować nowego żądania, dopóki nie ma miejsca
-   (backpressure „w górę”: zapełniony backlog gniazda, zamknięty model ruchu).
-3. **Odrzucać nadmiar** (*load shedding*) — szybko odmówić części żądań, żeby
-   reszta została obsłużona w rozsądnym czasie.
+**Definition.** **Backpressure** is the mechanism by which an overloaded service center **signals the
+sender** to slow down. When λ > X_max (00-theory), the system has only three options:
+1. **Queue without a limit** — accept everything; the waiting time grows without end, and so does
+   memory (this is the *absence* of backpressure).
+2. **Block the sender** — do not accept a new request until there is room (backpressure "upstream":
+   a full socket backlog, a closed workload model).
+3. **Reject the excess** (*load shedding*) — quickly refuse some requests so the rest are served in a
+   reasonable time.
 
-W HTTP z klientami spoza Twojej kontroli realny wybór to 1 albo 3.
+With HTTP clients outside your control, the real choice is between 1 and 3.
 
-**Intuicja.** Klub z bramkarzem. Bez bramkarza wpuszcza się wszystkich, w
-środku nie da się oddychać i nikt nie dostaje drinka. Z bramkarzem część osób
-słyszy przy drzwiach „pełno, wróćcie za 20 minut” — a ci w środku bawią się
-normalnie.
+**Intuition.** A club with a bouncer. Without one, everybody gets in, nobody can breathe inside, and
+nobody gets a drink. With a bouncer, some people hear at the door "we're full, come back in 20
+minutes" — and the people inside have a normal evening.
 
-**Po co to.** Kolejka bez limitu nie zwiększa pojemności — zmienia tylko
-**kto** i **jak długo** czeka. Przy wywołaniach minutowych to zamienia się w
-pracę zmarnowaną: klient rezygnuje po kilku minutach, a system i tak wykonuje
-jego żądanie albo porzuca je w połowie. Odrzucenie po 1 ms jest dla klienta
-(i dla Ciebie) lepszą odpowiedzią niż 504 po 6 minutach.
+**Why it matters.** A queue without a limit does not add capacity — it only changes **who** waits and
+**for how long**. With minute-long calls this turns into wasted work: the client gives up after a few
+minutes, and the system either still processes the request or abandons it halfway. A rejection after
+1 ms is a better answer for the client (and for you) than a 504 after 6 minutes.
 
-**Częsta pomyłka.** „Kolejka to bufor — wygładzi szczyt”. Wygładzi **krótki**
-szczyt, gdy średnie λ < X_max. Przy trwałym przeciążeniu kolejka tylko odracza
-porażkę i dokłada latencję wszystkim, także tym, których można było obsłużyć.
+**Common mistake.** "A queue is a buffer — it will smooth out the peak." It smooths a **short** peak,
+when the average λ < X_max. Under sustained overload the queue only postpones the failure and adds
+latency for everyone, including those who could have been served.
 
 ---
 
-## Kolejka ograniczona i jej rozmiar
+## The bounded queue and its size
 
-**Definicja.** **Kolejka ograniczona** ma maksymalną długość *K*; żądanie,
-które przychodzi do pełnej kolejki, dostaje od razu odmowę. Rozmiar *K* wynika
-z Little'a: żądanie na końcu kolejki czeka około **K / X_max**, więc
-**K ≈ akceptowalne czekanie × X_max**.
+**Definition.** A **bounded queue** has a maximum length *K*; a request that arrives at a full queue
+is refused immediately. *K* follows from Little's law: a request at the back of the queue waits about
+**K / X_max**, so **K ≈ acceptable wait × X_max**.
 
-**Intuicja.** Poczekalnia z określoną liczbą krzeseł. Jeśli wiesz, że lekarz
-przyjmuje 4 osoby na godzinę, a nikt nie chce czekać dłużej niż 2 godziny —
-stawiasz 8 krzeseł.
+**Intuition.** A waiting room with a fixed number of chairs. If you know the doctor sees 4 people an
+hour and nobody wants to wait more than 2 hours, you put out 8 chairs.
 
-**Po co to.** Rozwiązanie ćw. 12 ma kolejki 64 (krótkie) i 8 (długie):
-- krótkie: 64 / 30 na s ≈ **2.1 s** czekania na końcu kolejki przy pojemności
-  32 slotów (30/s);
-- długie: 8 / 0.105 na s ≈ **76 s** przy 16 slotach dla analiz trwających
-  ~153 s (16 / 153 ≈ 0.105/s).
+**Why it matters.** The ex. 12 solution has queues of 64 (short) and 8 (long):
+- short: 64 / 30 per s ≈ **2.1 s** of waiting at the back of the queue with a capacity of 32 slots
+  (30/s);
+- long: 8 / 0.105 per s ≈ **76 s** with 16 slots for analyses lasting ~153 s (16 / 153 ≈ 0.105/s).
 
-Dla długich pół minuty czekania w kolejce nie ma znaczenia przy kilku minutach
-obsługi; dla krótkich 2 s to już dużo. Rozmiar kolejki to decyzja o SLO, nie
-o pamięci.
+For long calls, half a minute in the queue does not matter next to several minutes of service; for
+short ones, 2 s is already a lot. The queue size is an SLO decision, not a memory decision.
 
-**Częsta pomyłka.** Limit kolejki bez limitu **czasu** czekania. Kolejka 8
-może się nie przepełnić, a mimo to żądania czekają długo, bo wszystkie sloty
-trzymają wielominutowe wywołania. Dlatego obok długości jest **budżet
-czekania** (niżej).
+**Common mistake.** A queue length limit without a **time** limit on waiting. A queue of 8 may never
+overflow, and yet requests wait a long time because all the slots are held by multi-minute calls.
+That is why, next to the length, there is a **wait budget** (below).
 
 ---
 
-## Odrzucanie: 503, Retry-After i budżet czekania
+## Load shedding: 503, Retry-After and the wait budget
 
-**Definicja.** Odmowa ma być **szybka i czytelna**: status **503 Service
-Unavailable** (albo 429, gdy limit dotyczy konkretnego klienta) z nagłówkiem
-**`Retry-After`** — po ilu sekundach warto spróbować ponownie. W rozwiązaniu
-ćw. 12 odmowa pada w dwóch miejscach:
-- **przy wejściu** — kolejka klasy pełna (`kolejka_pelna`), `Retry-After` =
-  budżet czekania klasy;
-- **po budżecie czekania** — żądanie, które nie dostało slotu w ciągu 5 s
-  (krótkie) / 20 s (długie), zostaje wyjęte z kolejki z 503 zamiast czekać
-  dalej.
+**Definition.** A refusal should be **fast and readable**: status **503 Service Unavailable** (or 429
+when the limit applies to a specific client) with a **`Retry-After`** header — after how many seconds
+it is worth trying again. In the ex. 12 solution the refusal happens in two places:
+- **at the door** — the class queue is full (`queue_full`), `Retry-After` = the class wait budget;
+- **after the wait budget** — a request that did not get a slot within 5 s (short) / 20 s (long) is
+  pulled from the queue with a 503 instead of waiting any longer.
 
-Wynik `odrzucone` jest liczony osobno w `app_requests_total{wynik}`.
+The `rejected` outcome is counted separately in `app_requests_total{outcome}`.
 
-**Intuicja.** „Proszę zadzwonić za 20 minut” jest lepsze niż trzymanie
-dzwoniącego na linii przez godzinę z muzyczką — dzwoniący wie, co zrobić,
-a linia jest wolna dla kogoś, kogo da się obsłużyć teraz.
+**Intuition.** "Please call back in 20 minutes" beats keeping the caller on the line for an hour with
+hold music — the caller knows what to do, and the line is free for someone who can be served now.
 
-**Po co to.** Ćw. 12, ruch mieszany 180 s (krótkie 4/s, długie 0.4/s), osobne
-pule 32 / 16 już naprawione (wariant C → B):
-- **bez limitu kolejki i budżetu (C)**: długie czekają p50 88 s / p99 272 s, w
-  t = 180 s czeka 46 długich (najstarsze 115 s), **30 klientów porzuca żądanie**
-  po 400 s (timeout k6) — 30 generacji anulowanych po minutach pracy; drain
-  402 s;
-- **z kolejką 8 i budżetem 20 s (B)**: **42 szybkie 503**, czekanie długich
-  p99 19.4 s, 8 czeka w t = 180 s, drain 213 s.
+**Why it matters.** Ex. 12, mixed traffic for 180 s (short 4/s, long 0.4/s), separate pools 32 / 16
+already fixed (variant C → B):
+- **no queue limit and no budget (C)**: long calls wait p50 88 s / p99 272 s, at t = 180 s there are 46
+  long calls waiting (the oldest 115 s), **30 clients abandon the request** after 400 s (the k6
+  timeout) — 30 generations cancelled after minutes of work; drain 402 s;
+- **with a queue of 8 and a 20 s budget (B)**: **42 fast 503s**, long-call wait p99 19.4 s, 8 waiting
+  at t = 180 s, drain 213 s.
 
-Liczba ukończonych długich spadła (43 → 30) — i to jest **poprawne**: moc dla
-długich (~0.1/s) jest czterokrotnie mniejsza niż dopływ (0.4/s). Bez odrzucania
-system i tak nie zrobiłby więcej, tylko wydłużył czekanie wszystkim i zmarnował
-pracę na porzucone żądania. Docelowo długie powinny trafić do kolejki zadań
-(czytanka 14a).
+The number of completed long calls dropped (43 → 30) — and that is **correct**: the capacity for long
+calls (~0.1/s) is four times smaller than the arrival rate (0.4/s). Without rejection the system
+would not have done more anyway; it would only have stretched the wait for everyone and wasted work
+on abandoned requests. Ultimately, long calls should go to a task queue (reading 14a).
 
-**Częsta pomyłka.** Klient, który na 503 odpowiada natychmiastowym
-ponowieniem — odmowa zamienia się w burzę ponowień (czytanka 08a). `Retry-After`
-działa tylko wtedy, gdy klienci go honorują; w Twoich własnych klientach
-(innych serwisach, workerach) to obowiązek. Druga pomyłka: odrzucanie
-mierzone tak, że zawyża błędy — szybkie 503 to **zdrowe** zachowanie pod
-przeciążeniem, a nie awaria; raportuj je osobno od 504 i 5xx.
+**Common mistake.** A client that answers a 503 with an immediate retry — the rejection turns into a
+retry storm (reading 08a). `Retry-After` works only if clients honor it; for your own clients (other
+services, workers) that is an obligation. A second mistake: measuring rejections in a way that
+inflates errors — a fast 503 is **healthy** behavior under overload, not a failure; report it
+separately from 504 and 5xx.
 
 ---
 
-## Deadline i jego propagacja
+## The deadline and its propagation
 
-**Definicja.** **Deadline** to bezwzględna chwila, po której wynik nie ma już
-wartości dla klienta. W odróżnieniu od timeoutu (ile czekać na jedną operację)
-deadline obejmuje **całość**: czekanie w kolejce, wywołanie, ponowienia.
-**Propagacja deadline'u** — każda warstwa wie, ile czasu zostało, i:
-- nie zaczyna pracy, która nie zdąży (np. nie wywołuje LLM, jeśli żądanie
-  przeczekało już większość budżetu w kolejce),
-- przekazuje pozostały czas dalej (do wywołań podrzędnych, jako timeout).
+**Definition.** A **deadline** is an absolute point in time after which the result is no longer worth
+anything to the client. Unlike a timeout (how long to wait for a single operation), a deadline covers
+**the whole**: the wait in the queue, the call, the retries. **Deadline propagation** — every layer
+knows how much time is left and:
+- does not start work that will not finish in time (for example, it does not call the LLM if the
+  request has already spent most of its budget in the queue),
+- passes the remaining time on (to downstream calls, as a timeout).
 
-**Intuicja.** Pociąg odjeżdża o 18:00. Jeśli o 17:55 stoisz w kolejce do kasy,
-a sprzedaż biletu trwa 10 minut — nie ma sensu stać dalej. Kasjer, który wie,
-o której odjeżdża Twój pociąg, odeśle Cię od razu.
+**Intuition.** The train leaves at 6:00 PM. If at 5:55 PM you are standing in line at the ticket
+window and the sale takes 10 minutes, there is no point in staying in line. A clerk who knows when
+your train leaves will send you away right now.
 
-**Po co to.** W kursie budżet czekania (ćw. 12: 5 s / 20 s) i deadline
-wywołania (ćw. 10: krótkie 30 s, długie 330 s, `asyncio.timeout`) to dwie
-części tego samego budżetu żądania. Bez nich żądanie potrafi czekać minutami
-w kolejce, a potem i tak zająć slot u dostawcy na kolejne minuty — dla
-klienta, który dawno się rozłączył.
+**Why it matters.** In the course, the wait budget (ex. 12: 5 s / 20 s) and the call deadline (ex. 10:
+short 30 s, long 330 s, `asyncio.timeout`) are two parts of the same request budget. Without them, a
+request can wait minutes in the queue and then still occupy a slot at the provider for more minutes —
+for a client that disconnected long ago.
 
-**Częsta pomyłka.** Wspólny deadline dla wszystkich klas. 150 s „ratuje”
-krótkie, ale zabija każdą analizę trwającą 200 s (test z budowy kursu: 7 / 7
-długich strumieni przeterminowanych). Deadline ma odpowiadać **klasie**
-żądania.
+**Common mistake.** One shared deadline for all classes. 150 s "saves" the short calls but kills every
+analysis that takes 200 s (a test run while building the course: 7 / 7 long streams exceeded their
+deadline). The deadline must match the request **class**.
 
 ---
 
-## Anulowanie po rozłączeniu i zwolnienie slotu
+## Cancellation on disconnect and releasing the slot
 
-**Definicja.** Gdy klient się rozłączy (zamknął kartę, timeout k6, proxy
-przerwało połączenie), serwer powinien **anulować** pracę wykonywaną dla
-niego: zadanie asyncio dostaje `CancelledError`, połączenie z dostawcą się
-zamyka, dostawca przerywa generację, slot semafora i slot u dostawcy wracają
-od razu. Serwer dowiaduje się o rozłączeniu przez ASGI (zdarzenie
-`http.disconnect`, w Starlette `await request.is_disconnected()`).
+**Definition.** When the client disconnects (closes the tab, a k6 timeout, a proxy drops the
+connection), the server should **cancel** the work being done for it: the asyncio task gets
+`CancelledError`, the connection to the provider is closed, the provider stops generating, and the
+semaphore slot and the provider slot are released right away. The server learns about the disconnect
+through ASGI (the `http.disconnect` event, in Starlette `await request.is_disconnected()`).
 
-Dwie pułapki zmierzone przy budowie kursu:
-- **Starlette 1.10 przy ASGI spec ≥ 2.4 nie nasłuchuje rozłączenia w
-  `StreamingResponse`** — aplikacja musi sama sprawdzać
-  `request.is_disconnected()` (w kursie: strażnik co 0.5 s obok wywołania LLM,
-  sprawdzanie co kilka fragmentów w strumieniu);
-- **`@app.middleware("http")` (BaseHTTPMiddleware) psuje
-  `request.is_disconnected()`** w handlerach — z nim anulowanie nie działało
-  wcale (6 / 6 generacji dokończonych „do nikogo”). Middleware aplikacji kursu
-  jest napisane jako czyste ASGI.
+Two pitfalls measured while building the course:
+- **Starlette 1.10 with ASGI spec ≥ 2.4 does not listen for disconnects in `StreamingResponse`** —
+  the application has to check `request.is_disconnected()` itself (in the course: a guard every 0.5 s
+  next to the LLM call, a check every few chunks in a stream);
+- **`@app.middleware("http")` (BaseHTTPMiddleware) breaks `request.is_disconnected()`** in handlers —
+  with it, cancellation did not work at all (6 / 6 generations finished "for nobody"). The course
+  application's middleware is written as pure ASGI.
 
-**Intuicja.** Klient restauracji wyszedł, zanim podano danie. Dobra kuchnia
-przestaje gotować i oddaje stolik następnym; zła gotuje do końca, a stolik
-stoi zajęty z talerzem dla nikogo.
+**Intuition.** A restaurant guest left before the dish was served. A good kitchen stops cooking and
+gives the table to the next party; a bad one cooks to the end, and the table sits occupied with a
+plate for nobody.
 
-**Po co to.** Przy wywołaniach minutowych to różnica rzędu minut na każdym
-porzuconym żądaniu. Ćw. 10: 6 analiz po 150 s generacji, klient rezygnuje po
-20 s:
-- bez anulowania: dostawca generuje dalej, sloty wolne dopiero **172.9 s** po
-  rozłączeniu, 18 porzuconych generacji (każda 3 ×, bo SDK ponawiał timeouty);
-- z anulowaniem: sloty wolne po **0.7 s**, 6 generacji anulowanych.
+**Why it matters.** With minute-long calls, this is a difference of minutes on every abandoned
+request. Ex. 10: 6 analyses with 150 s of generation, the client gives up after 20 s:
+- without cancellation: the provider keeps generating, slots free up only **172.9 s** after the
+  disconnect, 18 abandoned generations (each 3 ×, because the SDK retried the timeouts);
+- with cancellation: slots free up after **0.7 s**, 6 generations cancelled.
 
-W finale (4 wady naraz) brak anulowania widać jako `mock_llm_cancelled_total` =
-0 przy porzucających klientach i drain **125 s** po końcu ruchu (z anulowaniem:
-24 anulowane, drain 32 s).
+In the final (4 flaws at once), the missing cancellation shows up as `mock_llm_cancelled_total` = 0
+with abandoning clients and a drain of **125 s** after the end of traffic (with cancellation: 24
+cancelled, drain 32 s).
 
-**Częsta pomyłka.** „Klient się rozłączył, więc serwer przestał pracować”.
-Domyślnie nie: korutyna dalej czeka na dostawcę, a dostawca dalej generuje.
-Sprawdzenie: po przerwaniu testu `llm_inflight` i `mock_llm_generating` muszą
-spaść do zera w sekundach, a `mock_llm_cancelled_total` wzrosnąć.
+**Common mistake.** "The client disconnected, so the server stopped working." By default it did not:
+the coroutine keeps waiting for the provider and the provider keeps generating. How to check: after
+interrupting a test, `llm_inflight` and `mock_llm_generating` must fall to zero within seconds, and
+`mock_llm_cancelled_total` must rise.
 
 ---
 
-## Streaming SSE
+## SSE streaming
 
-**Definicja.** **Server-Sent Events** (SSE) to strumień zdarzeń tekstowych
-w jednej odpowiedzi HTTP (`Content-Type: text/event-stream`): każde zdarzenie
-to linie `event: …` i `data: …` zakończone pustą linią. Dostawca LLM wysyła
-nim odpowiedź kawałkami w miarę generacji (zdarzenia początku wiadomości,
-fragmentów treści, `ping`, końca). Aplikacja kursu przekazuje strumień dalej
-do klienta (`/reply/stream`: zdarzenia `delta` z fragmentami tekstu i `koniec`
-z czasami).
+**Definition.** **Server-Sent Events** (SSE) is a stream of text events within a single HTTP response
+(`Content-Type: text/event-stream`): each event is a set of `event: …` and `data: …` lines ended by a
+blank line. The LLM provider uses it to send a response in pieces as it is generated (events for the
+message start, content chunks, `ping`, the end). The course application passes the stream on to the
+client (`/reply/stream`: `delta` events with text chunks and `end` with the timings).
 
-**Intuicja.** Transmisja meczu na żywo zamiast nagrania udostępnionego po
-końcowym gwizdku — widz widzi akcję od pierwszej minuty, choć mecz trwa tyle
-samo.
+**Intuition.** A live broadcast of a match instead of a recording released after the final whistle —
+the viewer sees the action from the first minute, even though the match lasts just as long.
 
-**Po co to.** Trzy korzyści, każda ważna pod obciążeniem:
-1. **Odczuwany czas** — użytkownik widzi pierwsze słowa po TTFT (~0.5 s), nie
-   po całej generacji (kilka sekund — albo minut).
-2. **Semantyka timeoutów** — read timeout pilnuje przerw między zdarzeniami,
-   a nie całości (czytanka 08a); wielominutowa odpowiedź nie wymaga
-   10-minutowego read.
-3. **Wczesne wykrycie rozłączenia** — przy każdym fragmencie można sprawdzić,
-   czy klient jest jeszcze po drugiej stronie.
+**Why it matters.** Three benefits, each important under load:
+1. **Perceived time** — the user sees the first words after the TTFT (~0.5 s), not after the whole
+   generation (a few seconds — or minutes).
+2. **Timeout semantics** — the read timeout watches the gaps between events, not the whole response
+   (reading 08a); a multi-minute response does not need a 10-minute read timeout.
+3. **Early disconnect detection** — with every chunk you can check whether the client is still on the
+   other end.
 
-**Częsta pomyłka.** „Streaming jest szybszy”. Czas całkowity jest taki sam
-(TTFT + tokeny / tempo); zmienia się czas do **pierwszego** fragmentu i to,
-jak system reaguje na ciszę i rozłączenia.
+**Common mistake.** "Streaming is faster." The total time is the same (TTFT + tokens / speed); what
+changes is the time to the **first** chunk and how the system reacts to silence and disconnects.
 
 ---
 
-## TTFT serwera vs TTFT klienta i buforowanie
+## Server TTFT vs client TTFT, and buffering
 
-**Definicja.** Na ścieżce strumienia są co najmniej trzy różne „czasy do
-pierwszego tokenu”:
-- **TTFT u dostawcy / po stronie aplikacji** — od wysłania żądania do
-  pierwszego fragmentu od dostawcy (`llm_ttft_seconds`);
-- **pierwszy fragment wysłany klientowi** — od przyjęcia żądania przez
-  aplikację do wysłania pierwszego `delta` (`app_stream_first_chunk_seconds`);
-- **TTFT klienta** — od wysłania żądania do odebrania pierwszego fragmentu
-  (mierzony po stronie klienta, w kursie `scripts/strumien_ttft.py`).
+**Definition.** On the stream path there are at least three different "times to the first token":
+- **TTFT at the provider / on the application side** — from sending the request to the first chunk
+  from the provider (`llm_ttft_seconds`);
+- **the first chunk sent to the client** — from the application accepting the request to sending the
+  first `delta` (`app_stream_first_chunk_seconds`);
+- **client TTFT** — from sending the request to receiving the first chunk (measured on the client
+  side, in the course by `scripts/stream_ttft.py`).
 
-**Buforowanie strumienia** to sytuacja, w której ktoś po drodze zbiera
-fragmenty i wysyła je dopiero na końcu (albo w dużych porcjach): aplikacja
-składająca cały tekst przed pierwszym `yield`, warstwa kompresji, proxy
-buforujące odpowiedzi. TTFT dostawcy jest wtedy w porządku, a klient i tak
-czeka na całość.
+**Stream buffering** is a situation where someone along the way collects the chunks and sends them
+only at the end (or in large portions): an application that assembles the whole text before the
+first `yield`, a compression layer, a proxy that buffers responses. The provider's TTFT is then fine,
+and the client still waits for everything.
 
-**Intuicja.** Paczka wysłana ekspresem, która leży w sortowni do końca dnia,
-bo kurier rozwozi tylko pełne auto. Nadawca wysłał szybko, odbiorca dostał
-późno — każdy mierzy co innego.
+**Intuition.** A parcel sent by express that sits in the sorting center until the end of the day
+because the courier only delivers with a full truck. The sender sent it fast, the recipient received
+it late — each measures something different.
 
-**Po co to.** Ćw. 13: 20 strumieni po 5 naraz — z buforowaniem pierwszy
-fragment u klienta p50 **2.19 s = 100%** całości, po naprawie (`yield` każdego
-fragmentu) **0.55 s = 19%** całości (2.89 s). W finale: pierwszy fragment do
-klienta p50 **8.07 s** przy TTFT dostawcy 0.63 s — różnica to jednoznaczny
-sygnał buforowania (bez wady: 0.48 s vs 0.48 s).
+**Why it matters.** Ex. 13: 20 streams, 5 at a time — with buffering the first chunk at the client is
+p50 **2.19 s = 100%** of the total, after the fix (`yield` of every chunk) **0.55 s = 19%** of the
+total (2.89 s). In the final: the first chunk to the client p50 **8.07 s** with a provider TTFT of
+0.63 s — the difference is an unambiguous sign of buffering (without the flaw: 0.48 s vs 0.48 s).
 
-**Częsta pomyłka.** Zaufanie metryce czasu z generatora ruchu. W k6
-`http_req_waiting` przy SSE to czas **do nagłówków** — a `StreamingResponse`
-wysyła nagłówki od razu, zanim powstanie pierwszy fragment. Buforowanie jest
-dla tej metryki niewidoczne. Porównuj `app_stream_first_chunk_seconds` z
-`llm_ttft_seconds` albo mierz klientem, który czyta strumień.
+**Common mistake.** Trusting the timing metric from the load generator. In k6, `http_req_waiting` with
+SSE is the time **to the headers** — and `StreamingResponse` sends the headers right away, before the
+first chunk exists. Buffering is invisible to that metric. Compare `app_stream_first_chunk_seconds`
+with `llm_ttft_seconds`, or measure with a client that reads the stream.
 
 ---
 
-## Jak to się łączy (mapa)
+## How it all fits together (map)
 
 ```
- przybycie ──► kolejka ograniczona per klasa (64 / 8)  ── pełna ──► 503 + Retry-After (szybko)  [ćw. 12]
-                 │ budżet czekania (5 s / 20 s)        ── przekroczony ──► 503
+ arrival ──► bounded queue per class (64 / 8)  ── full ──► 503 + Retry-After (fast)          [ex. 12]
+                 │ wait budget (5 s / 20 s)    ── exceeded ──► 503
                  ▼
-              slot (osobne pule 32 / 16) ──► deadline per klasa (30 s / 330 s)              [ćw. 10]
-                 │                              └─ strażnik rozłączenia ──► anuluj: slot wraca w < 1 s
-                 ▼                                 (Starlette: is_disconnected() samemu; bez BaseHTTPMiddleware)
-              strumień SSE od dostawcy ── TTFT dostawcy (llm_ttft_seconds)
-                 ▼   yield każdego fragmentu (bez buforowania)                              [ćw. 13]
-              klient ── pierwszy fragment (app_stream_first_chunk_seconds, strumien_ttft.py)
-                        k6 http_req_waiting = nagłówki → buforowania NIE widzi
- K ≈ akceptowalne czekanie × X_max;  nadmiar trwały → odrzucać albo do kolejki zadań (czytanka 14a)
+              slot (separate pools 32 / 16) ──► deadline per class (30 s / 330 s)             [ex. 10]
+                 │                              └─ disconnect guard ──► cancel: slot returns in < 1 s
+                 ▼                                 (Starlette: call is_disconnected() yourself; no BaseHTTPMiddleware)
+              SSE stream from the provider ── provider TTFT (llm_ttft_seconds)
+                 ▼   yield every chunk (no buffering)                                         [ex. 13]
+              client ── first chunk (app_stream_first_chunk_seconds, stream_ttft.py)
+                        k6 http_req_waiting = headers → does NOT see buffering
+ K ≈ acceptable wait × X_max;  sustained excess → reject, or move to a task queue (reading 14a)
 ```
 
-Teraz przejdź do ćw. 12.
+Now move on to ex. 12.

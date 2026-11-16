@@ -1,5 +1,6 @@
-# Ćw. 13 — podpowiedź 1 (kierunek)
+# Ex. 13 — hint 1 (direction)
 
-Endpoint jest strumieniowy, ale coś po drodze zbiera fragmenty i oddaje je na końcu. Porównaj dwie chwile:
-kiedy aplikacja dostała pierwszy token od dostawcy i kiedy wysłała pierwszy fragment klientowi. Szukaj w
-generatorze odpowiedzi listy, do której trafiają fragmenty, zanim cokolwiek zostanie `yield`-owane.
+The endpoint is streaming, but something along the way collects the chunks and hands them over at the end.
+Compare two moments: when the application got the first token from the provider and when it sent the first
+chunk to the client. In the response generator, look for a list that the chunks go into before anything is
+`yield`ed.

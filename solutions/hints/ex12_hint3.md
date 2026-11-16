@@ -1,15 +1,15 @@
-# Ćw. 12 — podpowiedź 3 (pseudokod)
+# Ex. 12 — hint 3 (pseudocode)
 
 ```python
-# przeciazenie.py
-MAX_CZEKAJACYCH = {"krotkie": 64, "dlugie": 8}
-MAX_CZEKANIA_S = {"krotkie": 5.0, "dlugie": 20.0}
-def dopusc(klasa):
-    if stan.STAN[klasa].liczba_czekajacych >= MAX_CZEKAJACYCH[klasa]:
-        raise Odrzucone("kolejka_pelna", retry_after=MAX_CZEKANIA_S[klasa])
-def max_czekania(klasa): return MAX_CZEKANIA_S[klasa]
+# overload.py
+MAX_WAITING = {"short": 64, "long": 8}
+MAX_WAIT_S = {"short": 5.0, "long": 20.0}
+def admit(request_class):
+    if state.STATE[request_class].waiting_count >= MAX_WAITING[request_class]:
+        raise Rejected("queue_full", retry_after=MAX_WAIT_S[request_class])
+def max_wait(request_class): return MAX_WAIT_S[request_class]
 
 # limiter.py
-def semafor(klasa): return _SEMAFORY[klasa]
+def semaphore(request_class): return _SEMAPHORES[request_class]
 ```
-Wartości progów można brać z env (`KOLEJKA_KROTKIE`, `CZEKANIE_KROTKIE_S` …) — patrz `solutions/ex12_przeciazenie.py`. `python check.py ex12`.
+The threshold values can come from env (`QUEUE_SHORT`, `WAIT_SHORT_S` …) — see `solutions/ex12_overload.py`. `python check.py ex12`.

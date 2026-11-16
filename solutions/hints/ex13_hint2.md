@@ -1,7 +1,7 @@
-# Ćw. 13 — podpowiedź 2 (API / metryki)
+# Ex. 13 — hint 2 (API / metrics)
 
-- `app_stream_first_chunk_seconds` (wysłane klientowi) vs `llm_ttft_seconds{klasa="krotkie"}` (od dostawcy);
-  `python scripts/strumien_ttft.py -n 20 -c 5` — klient, który czyta strumień. k6 `http_req_waiting` = czas do
-  nagłówków, więc wady nie widzi.
-- W `app/strumien.py`: `yield sse("delta", …)` od razu w pętli `async for`; `pierwszy_fragment(czasy, t0)`
-  przy pierwszym; co ~20 fragmentów `await request.is_disconnected()` → koniec z `wynik = "anulowane"`.
+- `app_stream_first_chunk_seconds` (sent to the client) vs `llm_ttft_seconds{request_class="short"}` (from the
+  provider); `python scripts/stream_ttft.py -n 20 -c 5` — a client that reads the stream. k6 `http_req_waiting` =
+  time to the headers, so it does not see the flaw.
+- In `app/stream.py`: `yield sse("delta", …)` right away in the `async for` loop; `first_chunk(timings, t0)`
+  on the first chunk; every ~20 chunks `await request.is_disconnected()` → finish with `outcome = "cancelled"`.

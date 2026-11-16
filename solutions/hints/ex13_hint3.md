@@ -1,15 +1,15 @@
-# Ćw. 13 — podpowiedź 3 (pseudokod)
+# Ex. 13 — hint 3 (pseudocode)
 
 ```python
-async def generator():
+async def generate():
     i = 0
-    async for kawalek in klient.strumien(z):
+    async for chunk in client.stream(job):
         if i == 0:
-            pierwszy_fragment(czasy, t0)
-        yield sse("delta", {"tekst": kawalek})
+            first_chunk(timings, t0)
+        yield sse("delta", {"text": chunk})
         i += 1
         if i % 20 == 0 and await request.is_disconnected():
-            wynik = "anulowane"; return
-    yield sse("koniec", {...})
+            outcome = "cancelled"; return
+    yield sse("end", {...})
 ```
-`python check.py ex13` (pierwszy `delta` < 30% całości).
+`python check.py ex13` (the first `delta` < 30% of the total).

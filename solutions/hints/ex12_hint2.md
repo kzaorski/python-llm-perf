@@ -1,8 +1,9 @@
-# Ćw. 12 — podpowiedź 2 (API / metryki)
+# Ex. 12 — hint 2 (API / metrics)
 
-- `app/llm/limiter.py`: słownik semaforów `{"krotkie": Semaphore(SLOTY), "dlugie": Semaphore(SLOTY_DLUGIE)}`,
-  `SLOTY_DLUGIE = int(os.environ.get("LLM_SLOTY_DLUGIE", "16"))`; suma ≤ moc dostawcy.
-- `app/przeciazenie.py`: `dopusc(klasa)` → `raise Odrzucone("kolejka_pelna", retry_after=…)` gdy czeka już
-  `MAX_CZEKAJACYCH[klasa]` (64/8); `max_czekania(klasa)` → 5 s / 20 s (limiter rzuca `Odrzucone` po przekroczeniu).
-- Obserwuj: `max by (klasa) (llm_waiting)`, `max by (klasa) (llm_oldest_waiting_age_seconds)`,
-  `sum by (klasa, wynik) (increase(app_requests_total[5m]))`; po przebiegu `wyniki/*-przebieg.json`.
+- `app/llm/limiter.py`: a dictionary of semaphores `{"short": Semaphore(SLOTS), "long": Semaphore(SLOTS_LONG)}`,
+  `SLOTS_LONG = int(os.environ.get("LLM_SLOTS_LONG", "16"))`; the sum ≤ the provider's capacity.
+- `app/overload.py`: `admit(request_class)` → `raise Rejected("queue_full", retry_after=…)` when
+  `MAX_WAITING[request_class]` are already waiting (64/8); `max_wait(request_class)` → 5 s / 20 s (the limiter
+  raises `Rejected` once it is exceeded).
+- Watch: `max by (request_class) (llm_waiting)`, `max by (request_class) (llm_oldest_waiting_age_seconds)`,
+  `sum by (request_class, outcome) (increase(app_requests_total[5m]))`; after a run `results/*-run.json`.

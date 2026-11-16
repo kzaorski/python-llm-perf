@@ -1,5 +1,6 @@
-# Ćw. 12 — podpowiedź 1 (kierunek)
+# Ex. 12 — hint 1 (direction)
 
-Dwa osobne problemy: (1) krótkie i długie dzielą jedną pulę — długie zajmują ją na minuty (head-of-line
-blocking); (2) kolejka nie ma dna — przyjmujesz więcej, niż zdołasz obsłużyć, a klienci rezygnują po
-minutach. Rozdziel pule per klasa i powiedz „nie teraz” szybko: limit długości kolejki i budżet czekania.
+Two separate problems: (1) short and long requests share one pool — long ones hold it for minutes
+(head-of-line blocking); (2) the queue has no bottom — you accept more than you can serve, and clients
+give up after minutes. Split the pools per class and say "not now" quickly: a queue length limit and a
+wait budget.
