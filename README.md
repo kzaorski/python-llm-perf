@@ -1,5 +1,8 @@
 # python-llm-perf course — a Python LLM application under load
 
+> 🇵🇱 **Polish version:** this course was originally written in Polish — see the [`main`](https://github.com/kzaorski/python-llm-perf/tree/main) branch (or [`polish`](https://github.com/kzaorski/python-llm-perf/tree/polish)).
+> This `english` branch is a full translation (text, code, data); exercises, flaws and measured numbers are the same.
+
 A hands-on "learn-by-doing" course on the performance of applications that spend most of their time
 **waiting**: for a language model's response, for a slot, for a provider limit, in a queue. You work on a claims
 service desk assistant for an insurance company (FastAPI + asyncio + the Anthropic SDK), load it with k6 and
