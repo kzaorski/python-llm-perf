@@ -1,83 +1,89 @@
-# Ćw. 18 — klucz odpowiedzi: incydent „w poniedziałek rano wszystko zwolniło”
+# Ex. 18 — answer key: the incident "everything slowed down on Monday morning"
 
-> Czytaj dopiero po napisaniu własnego raportu.
+> Read only after you have written your own report.
 
-`./incydent.sh start final` uruchamia aplikację w stanie po ćw. 17 z czterema przywróconymi usterkami:
-jedną konfiguracyjną (`LLM_SLOTY=4`) i trzema w kodzie. Dodatkowo `FAQ_TTL_S=30` (krótszy TTL cache — nie jest
-usterką, tylko skraca okres, w którym stampede się powtarza, żeby był widoczny w 4-minutowym teście).
+`./incident.sh start final` starts the app in the state after ex. 17 with four flaws restored: one configuration
+flaw (`LLM_SLOTS=4`) and three in the code. In addition, `FAQ_TTL_S=30` (a shorter cache TTL — not a defect, it
+only shortens the period after which the stampede repeats, so that it is visible in a 4-minute test).
 
-Ruch (`./incydent.sh ruch`, k6 `incydent.js`, 240 s, model otwarty): streszczenia 8/s, odpowiedzi strumieniem
-1/s, FAQ 5/s (5 pytań), analizy 6/min (klient rezygnuje po 30 s). Liczby poniżej: ten sam ruch na incydencie i
-na stanie wzorcowym (`./incydent.sh start własny 17`), sygnały z Prometheusa w oknie przebiegu,
-`dropped_iterations` = 0 w obu.
+Traffic (`./incident.sh traffic`, k6 `incident.js`, 240 s, open model): summaries 8/s, streamed replies 1/s, FAQ 5/s
+(5 questions), analyses 6/min (the client gives up after 30 s). The numbers below: the same traffic on the incident
+and on the reference state (`./incident.sh start custom 17`), signals from Prometheus in the run window,
+`dropped_iterations` = 0 in both.
 
-## Usterki — objaw → ślad → przyczyna → naprawa
+## Defects — symptom → evidence → cause → fix
 
-### 1. Za mało slotów LLM (konfiguracja `LLM_SLOTY=4`) — ćw. 06
-- **Objaw:** streszczenia wolne albo 503 po ~5 s; u klienta (k6) 1406 × 503 obok 1619 × 200.
-- **Ślad:** `max(llm_inflight{klasa="krotkie"})` = **4** (wzorzec: 17); czekanie na slot p50 **3.99 s** (ucięte
-  budżetem czekania 5 s; wzorzec 0.003 s); `sum by (wynik) (increase(app_requests_total{endpoint="summary"}[5m]))`
-  → `odrzucone` **≈1586** (wzorzec 0; k6 policzył 1406 × 503 dla streszczeń — `increase()` ekstrapoluje na
-  granicach okna i liczy wszystkie odrzucone krótkie, więc liczby się nie pokrywają, rząd wielkości ten sam). Dostawca niedociążony: `max(mock_llm_generating)` = 16, z czego 12 to analizy
-  (wzorzec 19). Trace: długi `llm.queue_wait` obok krótkiego `llm.call` (`{span.llm.queue.wait_ms > 100.0}`).
-- **Przyczyna:** L = λ·W = 8/s × ~1 s ≈ 8 + FAQ + strumień ≫ 4 slotów. Odrzucenia to poprawna reakcja
-  ograniczonej kolejki (ćw. 12) na brak pojemności — nie usterka backpressure.
-- **Naprawa:** sloty z Little'a (32 dla krótkich, ćw. 06) — usunąć nadpisanie `LLM_SLOTY`. Dowód: sonda `check.py ex06`.
-- **Pułapka diagnozy:** 503 kuszą, by „podnieść limit kolejki”. Odróżnia je `llm_inflight` przyklejone do 4 przy
-  wolnej mocy dostawcy (przy poprawnych slotach 503 pojawiłyby się dopiero przy `mock_llm_generating` ≈ moc).
+### 1. Too few LLM slots (configuration `LLM_SLOTS=4`) — ex. 06
+- **Symptom:** summaries are slow or return 503 after ~5 s; on the client side (k6) 1406 × 503 next to 1619 × 200.
+- **Evidence:** `max(llm_inflight{request_class="short"})` = **4** (reference: 17); slot wait p50 **3.99 s** (cut
+  off by the 5 s wait budget; reference 0.003 s); `sum by (outcome) (increase(app_requests_total{endpoint="summary"}[5m]))`
+  → `rejected` **≈1586** (reference 0; k6 counted 1406 × 503 for summaries — `increase()` extrapolates at the window
+  boundaries and counts all rejected short requests, so the numbers do not match, but the order of magnitude is the same). The
+  provider is underloaded: `max(mock_llm_generating)` = 16, of which 12 are analyses (reference 19). Trace: a long
+  `llm.queue_wait` next to a short `llm.call` (`{span.llm.queue.wait_ms > 100.0}`).
+- **Cause:** L = λ·W = 8/s × ~1 s ≈ 8 + FAQ + stream ≫ 4 slots. The rejections are the correct reaction of a bounded
+  queue (ex. 12) to a lack of capacity — not a backpressure defect.
+- **Fix:** slots from Little's law (32 for short, ex. 06) — remove the `LLM_SLOTS` override. Proof: the
+  `check.py ex06` probe.
+- **Diagnostic pitfall:** the 503s tempt you to "raise the queue limit". What tells them apart is `llm_inflight`
+  stuck at 4 while the provider has spare capacity (with correct slots the 503s would appear only when
+  `mock_llm_generating` ≈ capacity).
 
-### 2. Strumień buforowany w całości (W9) — ćw. 13
-- **Objaw:** odpowiedzi strumieniem „pojawiają się naraz po kilku sekundach”; k6 `http_req_waiting` niski
-  (nagłówki od razu) — raport k6 wygląda dobrze.
-- **Ślad:** `histogram_quantile(0.5, sum by (le) (rate(app_stream_first_chunk_seconds_bucket[5m])))` = **8.07 s** vs
-  `llm_ttft_seconds` p50 **0.63 s** (wzorzec: 0.48 s vs 0.48 s). Część z 8 s to czekanie na slot (usterka 1),
-  ale różnica pierwszy fragment ≫ TTFT dostawcy + czekanie zostaje — `scripts/strumien_ttft.py`: pierwszy
-  fragment ≈ 100% czasu całości.
-- **Przyczyna:** generator zbiera fragmenty i wysyła je po zakończeniu generacji.
-- **Naprawa:** `yield` każdego fragmentu od razu + sprawdzanie rozłączenia (ćw. 13). Dowód: sonda `check.py ex13`.
+### 2. The stream is buffered in full (F9) — ex. 13
+- **Symptom:** streamed replies "appear all at once after a few seconds"; k6 `http_req_waiting` is low (headers
+  arrive immediately) — the k6 report looks fine.
+- **Evidence:** `histogram_quantile(0.5, sum by (le) (rate(app_stream_first_chunk_seconds_bucket[5m])))` = **8.07 s**
+  vs `llm_ttft_seconds` p50 **0.63 s** (reference: 0.48 s vs 0.48 s). Part of the 8 s is slot wait (defect 1), but
+  the gap first chunk ≫ provider TTFT + wait remains — `scripts/stream_ttft.py`: the first chunk ≈ 100% of the
+  total time.
+- **Cause:** the generator collects the chunks and sends them after the generation has finished.
+- **Fix:** `yield` every chunk immediately + check for disconnect (ex. 13). Proof: the `check.py ex13` probe.
 
-### 3. Cache FAQ bez single-flight — stampede (W10) — ćw. 15
-- **Objaw:** FAQ wolne co ~30 s, dostawca dostaje fale identycznych pytań.
-- **Ślad:** `sum by (wynik) (increase(app_cache_total[5m]))` → `miss` **290** przy 5 pytaniach i TTL 30 s (potrzeba
-  ≈ 5 × 240/30 = 40); wywołań LLM dla FAQ **295**; brak `wspolne` (wzorzec: 36 miss / 36 wywołań + 36 „wspolne”).
-  Test celowany: 50 identycznych nowych pytań → 50 wywołań LLM.
-- **Przyczyna:** każde chybienie samo woła LLM; nie ma mechanizmu „ktoś już liczy ten klucz”.
-- **Naprawa:** single-flight (`Future` w procesie + `SET NX PX` w Redisie, ćw. 15). Dowód: sonda `check.py ex15`.
+### 3. FAQ cache without single-flight — stampede (F10) — ex. 15
+- **Symptom:** FAQ is slow every ~30 s, the provider receives waves of identical questions.
+- **Evidence:** `sum by (outcome) (increase(app_cache_total[5m]))` → `miss` **290** with 5 questions and a 30 s TTL
+  (≈ 5 × 240/30 = 40 expected); LLM calls for FAQ **295**; no `shared` (reference: 36 misses / 36 calls + 36
+  "shared"). Targeted test: 50 identical new questions → 50 LLM calls.
+- **Cause:** every miss calls the LLM itself; there is no "someone is already computing this key" mechanism.
+- **Fix:** single-flight (an in-process `Future` + `SET NX PX` in Redis, ex. 15). Proof: the `check.py ex15` probe.
 
-### 4. Brak anulowania po rozłączeniu klienta (W16) — ćw. 10
-- **Objaw:** po zakończeniu ruchu system „jeszcze długo coś robi”; dostawca generuje analizy, na które nikt nie
-  czeka (klient analiz rezygnuje po 30 s).
-- **Ślad:** `sum by (phase) (increase(mock_llm_cancelled_total[10m]))` = **0** mimo porzuceń po stronie k6
-  (wzorzec: 24); `max(llm_inflight{klasa="dlugie"})` = **13** (wzorzec 4); `mock_llm_generating` spada do 0 dopiero
-  **125 s** po końcu ruchu (wzorzec 32 s); `/admin/stats` → `generating` > 0, `oldest_inflight_s` rośnie po końcu.
-- **Przyczyna:** wywołanie nie jest anulowane, gdy klient się rozłączy — trzyma slot aplikacji i slot dostawcy do
-  końca generacji (minuty).
-- **Naprawa:** strażnik `request.is_disconnected()` + anulowanie pracy, deadline per klasa (ćw. 10). Dowód: sonda
-  `check.py ex10`.
+### 4. No cancellation after the client disconnects (F16) — ex. 10
+- **Symptom:** after the traffic ends the system "keeps doing something for a long time"; the provider generates
+  analyses that nobody is waiting for (the analysis client gives up after 30 s).
+- **Evidence:** `sum by (phase) (increase(mock_llm_cancelled_total[10m]))` = **0** despite abandonments on the k6
+  side (reference: 24); `max(llm_inflight{request_class="long"})` = **13** (reference 4); `mock_llm_generating`
+  drops to 0 only **125 s** after the traffic ends (reference 32 s); `/admin/stats` → `generating` > 0,
+  `oldest_inflight_s` keeps growing after the end.
+- **Cause:** the call is not cancelled when the client disconnects — it holds an app slot and a provider slot until
+  the generation ends (minutes).
+- **Fix:** a `request.is_disconnected()` guard + cancelling the work, a deadline per class (ex. 10). Proof: the
+  `check.py ex10` probe.
 
-## Interakcje między usterkami (sprawdzone pomiarem)
-- **1 wzmacnia 3:** dłuższe czekanie na slot wydłuża okno chybienia — wszystkie żądania FAQ, które przyszły,
-  zanim pierwsze skończyło, też widzą „miss”. Dlatego 290 chybień zamiast ~40.
-- **1 zawyża objaw 2:** pierwszy fragment strumienia zawiera czekanie na slot; dlatego porównuj z `llm_ttft_seconds`
-  i czekaniem, a nie z „normą” z ćw. 13.
-- **4 zabiera sloty długim na długo**, ale nie krótkim — pule są osobne (ćw. 12); gdyby nie były, usterka 4
-  pogłębiłaby usterkę 1.
+## Interactions between the defects (verified by measurement)
+- **1 amplifies 3:** a longer slot wait lengthens the miss window — all FAQ requests that arrived before the first
+  one finished also see a "miss". That is why 290 misses instead of ~40.
+- **1 inflates the symptom of 2:** the first chunk of the stream includes the slot wait; that is why you compare it
+  with `llm_ttft_seconds` and the wait, not with the "norm" from ex. 13.
+- **4 takes slots from the long requests for a long time**, but not from the short ones — the pools are separate
+  (ex. 12); if they were not, defect 4 would deepen defect 1.
 
-## Co należało wykluczyć (i czym)
-- Burza ponowień i limity dostawcy: przyrost odpowiedzi atrapy w czasie incydentu to wyłącznie 200 (u mnie 836) —
-  zero 429/529, więc nie ma czego ponawiać (przy 4 slotach dostawca jest niedociążony). Sprawdzasz:
-  `curl -s 127.0.0.1:8061/admin/stats` i `sum by (status) (increase(llm_http_responses_total[5m]))`.
-- Blokada pętli / pula wątków: `/diag/ping` i `app_event_loop_lag_seconds` — w tym incydencie nie są źródłem
-  problemu (sprawdź liczbą; w moim przebiegu nie mierzyłem ich osobno, więc tu nie podaję wartości).
-- Kolejka bez limitu: kolejka krótkich jest ograniczona (w chwili końca dopływu 45 czeka, najstarsze 4.9 s —
-  budżet 5 s), szybkie 503 — to objaw usterki 1, nie brak backpressure.
-- `status 0` w k6: 96 krótkich (wzorzec 122) = `dial: i/o timeout` sieci Docker Desktop przy setkach nowych
-  połączeń (aplikacja ich nie zarejestrowała; występują w obu wariantach); 25 długich = zamierzone porzucenia po 30 s.
+## What you should have ruled out (and with what)
+- Retry storm and provider limits: the increase in the mock's responses during the incident is only 200s (836 in my
+  run) — zero 429/529, so there is nothing to retry (with 4 slots the provider is underloaded). You check:
+  `curl -s 127.0.0.1:8061/admin/stats` and `sum by (status) (increase(llm_http_responses_total[5m]))`.
+- Event loop blocking / thread pool: `/diag/ping` and `app_event_loop_lag_seconds` — in this incident they are not
+  the source of the problem (check with a number; in my run I did not measure them separately, so I give no value
+  here).
+- An unbounded queue: the short queue is bounded (when the inflow ended 45 were waiting, the oldest 4.9 s — the
+  budget is 5 s), and the fast 503s are a symptom of defect 1, not a lack of backpressure.
+- `status 0` in k6: 96 short (reference 122) = Docker Desktop network `dial: i/o timeout` with hundreds of new
+  connections (the app did not record them; they occur in both variants); 25 long = the intentional abandonments
+  after 30 s.
 
-## Rubryka samooceny
-| Poziom | Kryterium |
+## Self-assessment rubric
+| Level | Criterion |
 |---|---|
-| ⭐ | Wskazane ≥ 2 usterki z poprawną przyczyną, choć bez liczb lub z sygnałem ogólnym („p99 wysokie”). |
-| ⭐⭐ | Wszystkie 4 usterki z sygnałem specyficznym i liczbą; naprawa wskazana na poziomie mechanizmu. |
-| ⭐⭐⭐ | Jak wyżej + co najmniej 2 udokumentowane wykluczenia + jedna interakcja (np. 1 → 3) wyjaśniona i poparta liczbą; poprawna interpretacja 503 (usterka 1, nie backpressure) i `status 0` (sieć Dockera). |
-| ⭐⭐⭐⭐ | Jak wyżej + porównanie z przebiegiem na stanie wzorcowym w jednej tabeli i alerty PromQL (bonus), które odpalają na incydencie, a nie na wzorcu. |
+| ⭐ | ≥ 2 defects identified with the correct cause, but without numbers or with a generic signal ("p99 is high"). |
+| ⭐⭐ | All 4 defects with a specific signal and a number; the fix identified at the level of the mechanism. |
+| ⭐⭐⭐ | As above + at least 2 documented exclusions + one interaction (e.g. 1 → 3) explained and backed by a number; correct interpretation of the 503s (defect 1, not backpressure) and of `status 0` (Docker network). |
+| ⭐⭐⭐⭐ | As above + a comparison with the reference-state run in one table and PromQL alerts (bonus) that fire on the incident and not on the reference. |

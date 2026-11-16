@@ -184,15 +184,17 @@ inne w szczegółach — ważny jest kierunek i rząd wielkości.
 3. W ≈ TTFT + 700 / rate: at 225 tok/s ~3.6 s, at 250 ~3.3 s, at 301 ~2.8 s. Slots = λ·W — a rate difference
    of ±20% is ±20% of slots at the same traffic.
 
-## Ćw. 18 — finał
-1. Zobacz `solutions/ex18_odpowiedzi.md`: `llm_inflight{klasa="krotkie"}` przyklejone do 4 przy niedociążonym
-   dostawcy (`mock_llm_generating` z krótkich ≈ 4) = za mało slotów; poprawnie działający limit kolejki daje 503
-   przy slotach pracujących pełną mocą dostawcy. Pokaż zespołowi `llm_inflight` obok `mock_llm_generating`.
-2. `http_req_waiting` to czas do nagłówków odpowiedzi, a `StreamingResponse` wysyła je od razu — bufor jest
-   za nagłówkami. Trzeba mierzyć pierwszy fragment treści.
-3. Płaci właściciel konta u dostawcy (tokeny wygenerowane „do nikogo”) i inni klienci (sloty dostawcy zajęte).
-   Liczba: `mock_llm_cancelled_total` = 0 przy porzuconych żądaniach k6 i `mock_llm_generating` > 0 jeszcze
-   ~2 min po końcu ruchu (u mnie drain 125 s vs 32 s po naprawie).
+## Ex. 18 — the final
+1. See `solutions/ex18_answers.md`: `llm_inflight{request_class="short"}` stuck at 4 while the provider is
+   underloaded (`mock_llm_generating` from the short requests ≈ 4) = too few slots; a correctly working queue limit
+   produces 503s when the slots are running at the provider's full capacity. Show the team `llm_inflight` next to
+   `mock_llm_generating`.
+2. `http_req_waiting` is the time to the response headers, and `StreamingResponse` sends them right away — the
+   buffer sits behind the headers. You have to measure the first chunk of the body.
+3. The owner of the provider account pays (tokens generated "for nobody"), and so do the other clients (provider
+   slots occupied). The number: `mock_llm_cancelled_total` = 0 despite requests abandoned by k6, and
+   `mock_llm_generating` > 0 for another ~2 min after the traffic ends (in my run a drain of 125 s vs 32 s after
+   the fix).
 
 ---
 

@@ -1,8 +1,9 @@
-# Ćw. 18 — podpowiedź 2 (gdzie patrzeć)
+# Ex. 18 — hint 2 (where to look)
 
-- Streszczenia: `max by (klasa) (llm_inflight)` vs `max(mock_llm_generating)`; czekanie na slot p50; wyniki
-  `odrzucone`. Ile slotów ma aplikacja i czy dostawca jest zajęty?
-- Strumień: `app_stream_first_chunk_seconds` vs `llm_ttft_seconds`; `python scripts/strumien_ttft.py -n 20 -c 5`.
-- FAQ: `sum by (wynik) (increase(app_cache_total[5m]))` — ile chybień na 5 pytań przy TTL 30 s?
-- Analizy: `sum by (phase) (increase(mock_llm_cancelled_total[10m]))` i `mock_llm_generating` PO końcu ruchu.
-- Wykluczenia: próby HTTP / żądanie (`llm_http_attempts_total`), 429/529 u atrapy, lag pętli.
+- Summaries: `max by (request_class) (llm_inflight)` vs `max(mock_llm_generating)`; slot wait p50; `rejected`
+  outcomes. How many slots does the app have, and is the provider busy?
+- Stream: `app_stream_first_chunk_seconds` vs `llm_ttft_seconds`; `python scripts/stream_ttft.py -n 20 -c 5`.
+- FAQ: `sum by (outcome) (increase(app_cache_total[5m]))` — how many misses for 5 questions with a 30 s TTL?
+- Analyses: `sum by (phase) (increase(mock_llm_cancelled_total[10m]))` and `mock_llm_generating` AFTER the traffic
+  ends.
+- Exclusions: HTTP attempts per request (`llm_http_attempts_total`), 429/529 at the mock, event loop lag.

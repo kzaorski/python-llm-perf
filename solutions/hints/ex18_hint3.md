@@ -1,11 +1,11 @@
-# Ćw. 18 — podpowiedź 3 (szkielet raportu)
+# Ex. 18 — hint 3 (report skeleton)
 
-Dla każdej usterki:
+For every defect:
 ```
-Objaw:     <co widzi klient / który endpoint>
-Ślad:      <zapytanie PromQL/TraceQL lub polecenie> = <liczba z incydentu> (oczekiwane: <liczba na stanie wzorcowym>)
-Przyczyna: <mechanizm: np. „sloty < L = λ·W”, „bufor przed wysłaniem”, „brak single-flight”, „brak anulowania”>
-Naprawa:   <co zmienić> ; dowód: <sonda ćwiczenia NN / check>
+Symptom:  <what the client sees / which endpoint>
+Evidence: <PromQL/TraceQL query or command> = <number from the incident> (expected: <number on the reference state>)
+Cause:    <mechanism: e.g. "slots < L = λ·W", "buffer before sending", "no single-flight", "no cancellation">
+Fix:      <what to change> ; proof: <probe of exercise NN / check>
 ```
-Plus sekcja „Wykluczone” (z liczbami) i „Interakcje” (która usterka wzmacnia którą). Porównaj z
-`solutions/ex18_odpowiedzi.md`.
+Plus a "Ruled out" section (with numbers) and an "Interactions" section (which defect amplifies which). Compare
+with `solutions/ex18_answers.md`.
