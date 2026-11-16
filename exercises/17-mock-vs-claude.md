@@ -4,8 +4,8 @@
 > the cost of the default run (8 × 3 tasks, model `claude-haiku-5-5`) ≈ **$0.005** (in my run 24 calls:
 > $0.0042), certainly < $0.05. Without a key: the `--mock-only` mode (no cost).
 
-> Block V. Reading `14a-task-queues-cache-batching.md` ("Mock vs reality"); `00-theory.md` "LLM call
-> time: TTFT, tokens/s, tail".
+> Block V. Reading `14a-task-queues-cache-batching.md`; `00-theory.md` "LLM specifics: TTFT, tokens,
+> minutes, limits, cost".
 
 ## Goal
 The whole course stands on a mock: repeatable, with controlled limits and delays. Conclusions about capacity

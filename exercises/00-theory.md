@@ -86,8 +86,8 @@ for the semaphore), and `llm_call_duration_seconds` (the call).
 
 **Intuition.** A government office: the ticket from the machine and the time at the
 window. The clerk serves everyone in 3 minutes — that is S. If you spent an hour in
-the office, then 57 minutes of it was waiting, and *no* optimization of the work at
-the window (S from 3 to 2.5 minutes) is what you need. You need more windows or
+the office, then 57 minutes of it was waiting, and optimizing the work at the
+window (S from 3 to 2.5 minutes) will not help. You need more windows or
 fewer people at once.
 
 **Why it matters.** This is the first diagnostic decision: is the request slow
@@ -517,7 +517,7 @@ an hour.
   the SDK's default 2 retries: 3 × 60 s ≈ 180 s of waiting and a 504 error after
   181.6–191.6 s, 10 abandoned generations at the provider (exercise 10).
 - **Cancellation.** A client that disconnected after 20 s does not release the slot
-  on its own: without cancellation the provider generates "for nobody" for another
+  on its own: without cancellation the provider generates work nobody is waiting for, for another
   173 s; with cancellation the slot returns in 0.7 s (exercise 10).
 - **Drain.** After the inflow ends, long requests keep working for minutes — you
   measure the age of the oldest (`mock_llm_oldest_inflight_seconds`) and the backlog

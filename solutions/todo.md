@@ -1,15 +1,15 @@
-# Pomysły na rozszerzenia kursu
+# Ideas for extending the course
 
-Mapa umiejętności kursu jako roadmapa — co jeszcze można dodać jako wadę do diagnozy albo ćwiczenie.
+The course skills map as a roadmap — what else could be added as a flaw to diagnose or as an exercise.
 
-| Pomysł | Umiejętność diagnostyczna | Wada / sygnał |
+| Idea | Diagnostic skill | Flaw / signal |
 |---|---|---|
-| Wspólny limiter tempa w Redisie dla wielu procesów | limity dostawcy przy skalowaniu poziomym | 2 procesy × własny kubełek → 2× za dużo, 429 mimo limitera (ćw. 08, pytanie 2) |
-| Proxy (nginx) z buforowaniem odpowiedzi przed aplikacją | buforowanie strumienia poza aplikacją | `app_stream_first_chunk_seconds` OK, TTFT u klienta ≈ całość (ćw. 13, pytanie 2) |
-| Hedging (wysłanie drugiej kopii po p95) | ogon latencji vs koszt | ruch do dostawcy +5–10%, p99 w dół; bez budżetu — amplifikacja jak w ćw. 09 |
-| Priorytety w jednej puli (pożyczanie slotów) | bulkhead vs wykorzystanie | bonus ćw. 12 jako pełne ćwiczenie z pomiarem drainu |
-| Długie analizy przez kolejkę zadań z deadline'em zadania | kolejka zadań + wiek najstarszego jako SLO | bonus ćw. 14: wiek najstarszego rośnie bez limitu zamiast 503 |
-| Autoskalowanie workerów po `kolejka_wiek_najstarszego_s` | sterowanie pojemnością | skalowanie po `lag` nie działa przy dużym prefetchu (W15) |
-| Prompt caching dostawcy | koszt i TTFT przy powtarzalnym prefiksie | TTFT i tokeny wejścia przy wspólnym prompcie systemowym (wymaga prawdziwego API) |
-| Wyciek slotu przy wyjątku w strumieniu | zwalnianie zasobów w ścieżkach błędu | `llm_inflight` rośnie po każdym zerwanym strumieniu i nie wraca |
-| Alerty SLO (burn rate) na odrzuceniach i wieku kolejki | operacyjne wykrywanie przeciążenia | bonus finału jako osobne ćwiczenie |
+| Shared Redis rate limiter across processes | provider limits under horizontal scaling | 2 processes × their own bucket → 2× too much traffic, 429 despite the limiter (ex. 08, question 2) |
+| Proxy (nginx) buffering responses in front of the app | buffering of the stream outside the app | `app_stream_first_chunk_seconds` OK, client TTFT ≈ the whole response (ex. 13, question 2) |
+| Hedging (sending a second copy after p95) | latency tail vs cost | provider traffic +5–10%, p99 down; without a budget — amplification as in ex. 09 |
+| Priorities in one pool (borrowing slots) | bulkhead vs utilization | ex. 12 bonus as a full exercise with a drain measurement |
+| Long analyses through the task queue with a task deadline | task queue + age of the oldest entry as an SLO | ex. 14 bonus: the age of the oldest entry grows without a limit instead of a 503 |
+| Autoscaling workers on `queue_oldest_age_seconds` | capacity control | scaling on `lag` does not work with a large prefetch (F15) |
+| Provider prompt caching | cost and TTFT with a repeated prefix | TTFT and input tokens with a shared system prompt (requires the real API) |
+| Slot leak on an exception in the stream | releasing resources on error paths | `llm_inflight` grows after every broken stream and does not come back |
+| SLO alerts (burn rate) on rejections and queue age | operational detection of overload | final bonus as a separate exercise |

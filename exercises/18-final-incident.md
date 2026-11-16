@@ -3,7 +3,7 @@
 > Time: ~90 min: incident traffic ~4 min + drain up to ~2.5 min (you will run it 2–3 times), diagnosis, report,
 > fix and a comparison with traffic on the fixed state (another ~6 min).
 
-> Block V — closing the course. Before you start, review `00-theory.md` "USE and RED" and your notes from the
+> Block V — closing the course. Before you start, review `00-theory.md` "RED and USE for this application" and your notes from the
 > mini-incidents.
 
 ## Goal
@@ -78,7 +78,7 @@ independent defects; each has its own distinguishable signal (verified by measur
    both series of signals in one table.
 8. Compare your report with `solutions/ex18_answers.md` and grade yourself with the rubric at the end of that file.
 
-## Done criteria
+## Definition of done
 - [ ] The report identifies every defect of the incident with a distinguishable signal (a number from
       Prometheus/Tempo/the mock) and a cause at the level of the mechanism.
 - [ ] For at least two areas you have a documented exclusion (e.g. "there is no retry storm, because …").

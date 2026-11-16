@@ -9,8 +9,9 @@
 Besides short summaries (one second), the application now handles claim file analyses (1–4 min). You
 run realistic mixed traffic in the open model for 3 minutes and watch what happens during the run and
 AFTER the inflow ends: short requests wait minutes behind long ones (head-of-line blocking in a shared
-pool), the queue of long requests grows without a limit, clients give up, and the provider generates
-"for nobody". You fix this with three mechanisms: separate pools per class, a queue limit, and a wait
+pool), the queue of long requests grows without a limit, clients give up, and the provider keeps
+generating responses nobody is waiting for. You fix this with three mechanisms: separate pools per
+class, a queue limit, and a wait
 budget (a fast 503 with `Retry-After`).
 
 ## Theory in a nutshell

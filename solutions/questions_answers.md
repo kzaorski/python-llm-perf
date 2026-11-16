@@ -191,14 +191,14 @@ will differ in the details — what matters is the direction and the order of ma
    `mock_llm_generating`.
 2. `http_req_waiting` is the time to the response headers, and `StreamingResponse` sends them right away — the
    buffer sits behind the headers. You have to measure the first chunk of the body.
-3. The owner of the provider account pays (tokens generated "for nobody"), and so do the other clients (provider
+3. The owner of the provider account pays (tokens generated as wasted work), and so do the other clients (provider
    slots occupied). The number: `mock_llm_cancelled_total` = 0 despite requests abandoned by k6, and
    `mock_llm_generating` > 0 for another ~2 min after the traffic ends (in my run a drain of 125 s vs 32 s after
    the fix).
 
 ---
 
-## Mini-incydenty
+## Mini-incidents
 
 ### Mini-I (after Block I) — "the report says OK, customers say otherwise"
 - **Symptom:** k6 closed, 4 VUs: p99 1.61 s, wait 0; open traffic 4/s: p99 2.58 s, wait p99 1.46 s.

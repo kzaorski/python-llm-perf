@@ -136,7 +136,7 @@ Two pitfalls measured while building the course:
   the application has to check `request.is_disconnected()` itself (in the course: a guard every 0.5 s
   next to the LLM call, a check every few chunks in a stream);
 - **`@app.middleware("http")` (BaseHTTPMiddleware) breaks `request.is_disconnected()`** in handlers —
-  with it, cancellation did not work at all (6 / 6 generations finished "for nobody"). The course
+  with it, cancellation did not work at all (6 / 6 generations finished as wasted work). The course
   application's middleware is written as pure ASGI.
 
 **Intuition.** A restaurant guest left before the dish was served. A good kitchen stops cooking and

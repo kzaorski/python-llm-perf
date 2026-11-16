@@ -5,7 +5,6 @@ A hands-on "learn-by-doing" course on the performance of applications that spend
 service desk assistant for an insurance company (FastAPI + asyncio + the Anthropic SDK), load it with k6 and
 watch it in Grafana (Tempo, Prometheus, Pyroscope). The application starts with built-in flaws — finding,
 measuring and fixing them is the content of the 18 exercises.
-Instructions in English.
 
 > Course verified 2026-11 on: Python 3.13.13, fastapi 0.162.0, starlette 1.10.0, uvicorn 0.54.0,
 > gunicorn 26.2.0 + uvicorn-worker 0.4.0, anthropic 2.3.0 (httpx2 2.16.0), opentelemetry-sdk 1.45.2
