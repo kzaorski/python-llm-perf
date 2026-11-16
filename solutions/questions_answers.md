@@ -123,26 +123,28 @@ inne w szczegółach — ważny jest kierunek i rząd wielkości.
    cut off for 30 s — all traffic goes to `b`, although `a` is healthy. Takeaway: first remove the cause (the
    pool), and have the breaker count only provider errors, not your own limits.
 
-## Ćw. 12 — backpressure i odrzucanie
-1. Po 5 minutach klient zwykle już zrezygnował — 200 trafia „do nikogo”, a slot i generacja dostawcy zostały
-   zmarnowane (przebieg C: 30 porzuconych generacji). Szybkie 503 z `Retry-After` pozwala klientowi ponowić
-   później, przejść do innego kanału, a systemowi obsłużyć tych, których obsłużyć zdąży.
-2. Budżet ≤ cierpliwość klienta minus czas obsługi: jeśli klient (przeglądarka, proxy, inny serwis) czeka
-   najwyżej 10 s, a obsługa trwa 1–2 s, czekanie > ~5–8 s i tak skończy się porzuceniem. Aplikacja nie zna
-   timeoutu klienta ani tego, czy użytkownik jeszcze patrzy — te liczby bierzesz z SLO/umowy.
-3. Zwiększyć pojemność (więcej mocy u dostawcy, krótsze odpowiedzi, drugi dostawca), przesunąć w czasie
-   (kolejka zadań z wynikiem asynchronicznym), zdegradować (krótsza analiza). W ćw. 14 — kolejka zadań: klient
-   nie trzyma połączenia, a czekanie jest jawne (wiek najstarszego zadania).
+## Ex. 12 — backpressure and load shedding
+1. After 5 minutes the client has usually given up already — the 200 goes "to nobody", and the slot and the
+   provider's generation are wasted (run C: 30 abandoned generations). A fast 503 with `Retry-After` lets the
+   client retry later or switch to another channel, and lets the system serve the ones it can still serve in time.
+2. Budget ≤ the client's patience minus the service time: if the client (a browser, a proxy, another service)
+   waits at most 10 s and service takes 1–2 s, a wait of more than ~5–8 s will end in abandonment anyway. The
+   application knows neither the client's timeout nor whether the user is still looking — you take those
+   numbers from the SLO/contract.
+3. Increase capacity (more capacity at the provider, shorter responses, a second provider), shift it in time
+   (a task queue with an asynchronous result), degrade (a shorter analysis). In ex. 14 — a task queue: the client
+   does not hold the connection, and the wait is explicit (the age of the oldest task).
 
-## Ćw. 13 — streaming i TTFT
-1. Czekanie na slot i limiter (czas przed wywołaniem), narzut sieci/SDK do pierwszego zdarzenia, przetworzenie
-   i wysłanie pierwszego fragmentu przez aplikację.
-2. Porównaj `app_stream_first_chunk_seconds` (aplikacja wysłała) z pierwszym fragmentem zmierzonym u klienta
-   (`scripts/strumien_ttft.py` przez proxy). Gdy aplikacja wysyła po 0.5 s, a klient dostaje po 3 s — bufor jest
-   między nimi (proxy: wyłącz buforowanie, np. `X-Accel-Buffering: no`).
-3. Przed: generator zbiera całość, nie sprawdza rozłączenia — slot i generacja trwają do końca (3 s), potem
-   wysyłka do zamkniętego połączenia. Po: przy najbliższym sprawdzeniu `is_disconnected()` generator kończy,
-   wywołanie jest anulowane, slot wraca, dostawca przerywa generację (`mock_llm_cancelled_total`).
+## Ex. 13 — streaming and TTFT
+1. The wait for a slot and the limiter (time before the call), network/SDK overhead up to the first event, and
+   the application processing and sending the first chunk.
+2. Compare `app_stream_first_chunk_seconds` (the application sent) with the first chunk measured at the client
+   (`scripts/stream_ttft.py` through the proxy). When the application sends after 0.5 s and the client receives
+   after 3 s — the buffer is between them (proxy: turn off buffering, e.g. `X-Accel-Buffering: no`).
+3. Before: the generator collects everything and does not check for a disconnect — the slot and the generation
+   last to the end (3 s), then the send goes to a closed connection. After: at the next `is_disconnected()`
+   check the generator finishes, the call is cancelled, the slot returns, and the provider stops generating
+   (`mock_llm_cancelled_total`).
 
 ## Ćw. 14 — kolejka zadań
 1. Nie: przy 2 × 100 „szybko” oznaczało 179/200 błędów 529. 2 × 4 = 8 = moc dostawcy, więc przepustowość
@@ -223,9 +225,9 @@ inne w szczegółach — ważny jest kierunek i rząd wielkości.
 - **Fix:** a single layer (SDK `max_retries=0`), full jitter, `retry-after`, a 20% budget (ex. 09);
   `check.py ex09` PASS (in my run ×1.20).
 
-### Mini-IV (po bloku IV) — „streszczenia wolne, kiedy działa dział analiz”
-- **Objaw:** gdy w tle trwa 40 analiz po 60 s, streszczenie dostaje 503 po ~5 s (u mnie: 503 po 5.0 s).
-- **Ślad:** `/diag` → `kolejka.dlugie.w_toku` = 32 (wszystkie sloty), `krotkie.w_toku` = 0; `llm_inflight`
-  per klasa — długie zajmują całą pulę; limit kolejki i budżet czekania działają (stąd szybkie 503 zamiast minut).
-- **Przyczyna:** jedna wspólna pula slotów dla krótkich i długich (head-of-line blocking).
-- **Naprawa:** osobne pule per klasa (32 / 16, ćw. 12); `check.py ex12` PASS (krótkie czekanie p99 0 ms).
+### Mini-IV (after Block IV) — "summaries are slow while the analysis team is running"
+- **Symptom:** with 40 analyses of 60 s each running in the background, a summary gets a 503 after ~5 s (in my run: 503 after 5.0 s).
+- **Evidence:** `/diag` → `queue.long.inflight` = 32 (all the slots), `queue.short.inflight` = 0; `llm_inflight`
+  per class — the long calls occupy the whole pool; the queue limit and the wait budget work (hence the fast 503 instead of minutes).
+- **Cause:** one shared slot pool for short and long calls (head-of-line blocking).
+- **Fix:** separate pools per class (32 / 16, ex. 12); `check.py ex12` PASS (short wait p99 0 ms).
