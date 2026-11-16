@@ -1,5 +1,5 @@
-# Ćw. 15 — podpowiedź 1 (kierunek)
+# Ex. 15 — hint 1 (direction)
 
-Wszystkie 50 żądań sprawdza cache w tej samej chwili — wszystkie widzą „brak” i każde liczy samo. Potrzebujesz
-mechanizmu „ktoś już liczy ten klucz — poczekaj na jego wynik”. W jednym procesie wystarczy wspólny obiekt
-oczekiwania; między procesami — blokada w Redisie.
+All 50 requests check the cache at the same moment — all of them see "missing" and each computes on its own. You need a
+mechanism of "somebody is already computing this key — wait for their result". Within one process a shared awaitable
+object is enough; across processes — a lock in Redis.

@@ -1,5 +1,5 @@
-# Ćw. 17 — podpowiedź 3 (obliczenie)
+# Ex. 17 — hint 3 (calculation)
 
-Sloty = λ × W. Dla streszczeń: W_claude ≈ 1.23 s (med), ogon do ~1.8 s; przy 20/s → ~25 (med) / ~36 (ogon).
-Dla odpowiedzi 700 tokenów: W ≈ 0.48 + 700/225 ≈ 3.6 s → przy tym samym λ ~3× więcej slotów niż dla streszczeń.
-Read timeout krótkich: wielokrotność maksimum ciszy, nie maksimum (ogon w innych godzinach bywa dłuższy).
+Slots = λ × W. For summaries: W_claude ≈ 1.23 s (med), the tail up to ~1.8 s; at 20/s → ~25 (med) / ~36 (tail).
+For a reply of 700 tokens: W ≈ 0.48 + 700/225 ≈ 3.6 s → at the same λ ~3× more slots than for summaries.
+Read timeout of the short calls: a multiple of the maximum silence, not the maximum (the tail at other hours can be longer).

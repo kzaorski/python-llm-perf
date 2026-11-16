@@ -1,16 +1,16 @@
-# Ćw. 14 — podpowiedź 3 (pseudokod)
+# Ex. 14 — hint 3 (pseudocode)
 
 ```python
-G_LAG = Gauge("kolejka_lag", "..."); G_PENDING = Gauge("kolejka_pending", "...")
-G_WIEK = Gauge("kolejka_wiek_najstarszego_s", "...")
+G_LAG = Gauge("queue_lag", "..."); G_PENDING = Gauge("queue_pending", "...")
+G_AGE = Gauge("queue_oldest_age_seconds", "...")
 
-async def probkuj(r):
-    grupa = next((g for g in await r.xinfo_groups(STRUMIEN) if g["name"] == GRUPA), None)
-    lag = pending = 0; wiek = 0.0
-    if grupa:
-        lag, pending = int(grupa["lag"] or 0), int(grupa["pending"] or 0)
-        nast = await r.xrange(STRUMIEN, min="(" + grupa["last-delivered-id"], max="+", count=1)
-        if nast: wiek = time.time() - int(nast[0][0].split("-")[0]) / 1000
-    G_LAG.set(lag); G_PENDING.set(pending); G_WIEK.set(wiek)
+async def sample(r):
+    group = next((g for g in await r.xinfo_groups(STREAM) if g["name"] == GROUP), None)
+    lag = pending = 0; age = 0.0
+    if group:
+        lag, pending = int(group["lag"] or 0), int(group["pending"] or 0)
+        next_entry = await r.xrange(STREAM, min="(" + group["last-delivered-id"], max="+", count=1)
+        if next_entry: age = time.time() - int(next_entry[0][0].split("-")[0]) / 1000
+    G_LAG.set(lag); G_PENDING.set(pending); G_AGE.set(age)
 ```
-Obsłuż brak strumienia/grupy (`ResponseError`) — eksporter ma działać przed startem workera. `python check.py ex14`.
+Handle a missing stream/group (`ResponseError`) — the exporter has to work before the worker starts. `python check.py ex14`.

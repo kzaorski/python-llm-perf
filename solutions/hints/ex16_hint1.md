@@ -1,5 +1,5 @@
-# Ćw. 16 — podpowiedź 1 (kierunek)
+# Ex. 16 — hint 1 (direction)
 
-Zmierz dwa końce: jedna prośba, gdy nikt inny nie pyta (ile czeka na okno?), i 30 naraz (jak duże są wsady?).
-Okno to czas, który dokładasz każdemu przy małym ruchu; rozmiar to granica, ile zgłoszeń niesie jedno
-wywołanie. Oba parametry są w `app/wsad.py` i nie wymagają nowego kodu.
+Measure the two ends: one request when nobody else is asking (how long does it wait for the window?), and 30 at once (how big are the
+batches?). The window is the time you add to everyone under low traffic; the size is the limit on how many claims one call
+carries. Both parameters are in `app/batch.py` and require no new code.

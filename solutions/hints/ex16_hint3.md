@@ -1,7 +1,7 @@
-# Ćw. 16 — podpowiedź 3 (zmiana)
+# Ex. 16 — hint 3 (the change)
 
 ```python
-OKNO_S = float(os.environ.get("WSAD_OKNO_S", "0.05"))
-MAX_WSAD = int(os.environ.get("WSAD_MAX", "16"))
+WINDOW_S = float(os.environ.get("BATCH_WINDOW_S", "0.05"))
+MAX_BATCH = int(os.environ.get("BATCH_MAX", "16"))
 ```
-Restart, powtórka pomiarów z kroku 3, `python check.py ex16`.
+Restart, repeat the measurements from step 3, `python check.py ex16`.

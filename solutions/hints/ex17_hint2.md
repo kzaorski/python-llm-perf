@@ -1,6 +1,6 @@
-# Ćw. 17 — podpowiedź 2 (polecenia)
+# Ex. 17 — hint 2 (commands)
 
-- `python scripts/porownaj_z_claude.py --tylko-atrapa -n 3` → `wyniki/ex17-porownanie.json` (sekcja `atrapa`).
-- Z kluczem tylko w powłoce (`read -s ANTHROPIC_API_KEY && export ANTHROPIC_API_KEY`): bez `--tylko-atrapa`;
-  koszt ≈ $0.005. Po pomiarze `unset ANTHROPIC_API_KEY`.
-- Porównuj `ttft_p50_s`, `ttft_max_s`, `calosc_p50_s`, `tok_na_s_p50` per zadanie oraz nagłówki `naglowki`.
+- `python scripts/compare_with_claude.py --mock-only -n 3` → `results/ex17-comparison.json` (the `mock` section).
+- With a key only in the shell (`read -s ANTHROPIC_API_KEY && export ANTHROPIC_API_KEY`): without `--mock-only`;
+  cost ≈ $0.005. After the measurement `unset ANTHROPIC_API_KEY`.
+- Compare `ttft_p50_s`, `ttft_max_s`, `total_p50_s`, `tok_per_s_p50` per task and the `headers` headers.

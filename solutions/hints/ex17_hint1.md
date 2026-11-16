@@ -1,4 +1,4 @@
-# Ćw. 17 — podpowiedź 1 (kierunek)
+# Ex. 17 — hint 1 (direction)
 
-Cel to nie „który szybszy”, tylko: czy W (czas obsługi) i jego ogon, na których liczyłeś sloty i timeouty,
-przenoszą się na prawdziwe API. Najpierw uruchom tryb `--tylko-atrapa` (bez kosztu), żeby mieć punkt odniesienia.
+The goal is not "which is faster", but: do W (service time) and its tail, on which you based your slots and timeouts,
+carry over to the real API. First run the `--mock-only` mode (no cost) to have a reference point.

@@ -1,70 +1,71 @@
-# Ćwiczenie 16: Batching — okno i rozmiar wsadu a latencja i przepustowość
+# Exercise 16: Batching — batch window and size vs latency and throughput
 
-> Czas: ~35 min
+> Time: ~35 min
 
-> Blok V. Czytanka `14a-kolejki-zadan-cache-batching.md` (batching: okno, rozmiar, dwa końce).
+> Block V. Reading `14a-task-queues-cache-batching.md` (batching: window, size, the two ends).
 
-## Cel
-Ocena priorytetu zgłoszenia (`POST /claims/{n}/priority`) to krótkie zadanie: kilka tokenów wyjścia. Zamiast
-wywołania na każde zgłoszenie aplikacja zbiera prośby we wsad i wysyła jedno wywołanie dla wielu zgłoszeń —
-mniej żądań do dostawcy (limit RPM, ćw. 08). Okno i rozmiar wsadu dobrano jednak „na oko”. Mierzysz oba końce:
-pojedynczą prośbę przy małym ruchu i wsady przy dużym, i dobierasz parametry do SLO.
+## Goal
+Assessing a claim's priority (`POST /claims/{n}/priority`) is a short task: a few output tokens. Instead of one call
+per claim, the application collects requests into a batch and sends one call for many claims — fewer requests to
+the provider (the RPM limit, ex. 08). The batch window and size, however, were chosen "by eye". You measure both ends:
+a single request under low traffic and batches under high traffic, and you choose the parameters to fit the SLO.
 
-## Teoria w pigułce
-- **Batching** — wspólny narzut (połączenie, prompt systemowy, slot, limit RPM) dzielony przez N zgłoszeń.
-  Intuicja: autobus zamiast taksówek. Po co: mniej wywołań przy tym samym ruchu.
-- **Okno (`OKNO_S`)** — jak długo czekamy na skompletowanie wsadu. Przy małym ruchu każda prośba czeka
-  pełne okno — dokładasz je wprost do latencji.
-- **Rozmiar (`MAX_WSAD`)** — górna granica zgłoszeń w jednym wywołaniu. Za duży: wejście ~N× większe, dłuższa
-  generacja (czas wywołania rośnie z liczbą tokenów wyjścia), jeden wolny wsad psuje ogon wszystkich N; przy
-  limicie tokenów wejścia (ITPM) 429 trafia cały wsad naraz.
-- Pułapka: mierzysz tylko przy dużym ruchu (wsady pełne, „działa”) albo tylko pojedynczo — trzeba obu końców.
-  Little: przy λ próśb/s okno T zbiera średnio λ·T zgłoszeń.
+## Theory in a nutshell
+- **Batching** — the shared overhead (connection, system prompt, slot, RPM limit) divided by N claims.
+  Intuition: a bus instead of taxis. Why it matters: fewer calls for the same traffic.
+- **Window (`WINDOW_S`)** — how long we wait for the batch to fill. Under low traffic every request waits the
+  full window — you add it directly to latency.
+- **Size (`MAX_BATCH`)** — the upper bound on claims in one call. Too big: ~N× larger input, a longer
+  generation (call time grows with the number of output tokens), one slow batch ruins the tail for all N; with an input-token
+  limit (ITPM) a 429 hits the whole batch at once.
+- The trap: you measure only under high traffic (full batches, "it works") or only single requests — you need both ends.
+  Little: at λ requests/s a window T collects on average λ·T claims.
 
-## Kroki
-1. Stan po ćw. 15, aplikacja na 8060. Zajrzyj do **`app/wsad.py`**: `OKNO_S = 2.0`, `MAX_WSAD = 100`.
-2. **Hipoteza:** ile potrwa jedna prośba o priorytet, gdy nikt inny nie pyta? A 30 równoczesnych — ile
-   wsadów, jakiej wielkości?
-3. Oba końce:
+## Steps
+1. State after ex. 15, application on 8060. Look into **`app/batch.py`**: `WINDOW_S = 2.0`, `MAX_BATCH = 100`.
+2. **Hypothesis:** how long will a single priority request take when nobody else is asking? And 30 concurrent ones — how
+   many batches, of what size?
+3. Both ends:
    ```bash
    curl -s -w '  [%{time_total} s]\n' -X POST 127.0.0.1:8060/claims/7/priority
-   seq 30 | xargs -P 30 -I{} curl -s -X POST 127.0.0.1:8060/claims/{}/priority | python -c "import sys,json; r=[json.loads(l) for l in sys.stdin.read().replace('}{','}\n{').splitlines() if l.strip()]; print('odpowiedzi', len(r), 'rozmiary wsadów', sorted({x['rozmiar_wsadu'] for x in r}), 'czekanie max ms', max(x['czekanie_na_wsad_ms'] for x in r))"
+   seq 30 | xargs -P 30 -I{} curl -s -X POST 127.0.0.1:8060/claims/{}/priority | python -c "import sys,json; r=[json.loads(l) for l in sys.stdin.read().replace('}{','}\n{').splitlines() if l.strip()]; print('responses', len(r), 'batch sizes', sorted({x['batch_size'] for x in r}), 'wait max ms', max(x['batch_wait_ms'] for x in r))"
    ```
-   Prometheus — średni rozmiar wsadu od startu procesu (histogram jest liczony od uruchomienia aplikacji;
-   `rate()`/`increase()` po świeżym restarcie nie policzą pierwszej serii próbek, a kwantyl z kilku wsadów to
-   tylko interpolacja kubełków):
+   Prometheus — the average batch size since the process start (the histogram is counted from the application start;
+   `rate()`/`increase()` after a fresh restart will not count the first series of samples, and a quantile from a few
+   batches is only a bucket interpolation):
    ```
    sum(app_batch_size_sum) / sum(app_batch_size_count)
    ```
-   U mnie: pojedyncza prośba **2.56 s** (`czekanie_na_wsad_ms` 2001.6 — całe okno), 30 równoczesnych → jeden
-   wsad **30**, czekanie max 2002 ms; średni wsad 15.5.
-4. W Tempo otwórz ślad jednej prośby: ile z czasu to czekanie na wsad, ile `llm.call`?
-5. **Dobór parametrów (W11).** W **`app/wsad.py`** (`TODO ćw. 16`) zmień `OKNO_S` i `MAX_WSAD`. Kryteria:
-   pojedyncza prośba < 1.2 s (okno nie może dominować latencji), przy ruchu ~20–30 próśb/s wsad > 1 (bo inaczej
-   batching nic nie daje) i mały (krótka generacja). Policz z Little'a, ile zgłoszeń zbierze okno 50 ms przy 30/s.
-6. Restart, powtórka kroku 3. U mnie: pojedyncza **0.79 s** (czekanie na wsad 53 ms), 30 równoczesnych →
-   wsady **14 i 16**, czekanie max 50 ms; `check.py ex16`: pojedyncza 0.60 s, wsad max 16.
+   In my run: a single request **2.56 s** (`batch_wait_ms` 2001.6 — the whole window), 30 concurrent → one
+   batch of **30**, wait max 2002 ms; average batch 15.5.
+4. In Tempo open the trace of a single request: how much of the time is the batch wait, how much is `llm.call`?
+5. **Choosing the parameters (F11).** In **`app/batch.py`** (`TODO ex. 16`) change `WINDOW_S` and `MAX_BATCH`. Criteria:
+   a single request < 1.2 s (the window must not dominate latency), at ~20–30 requests/s a batch > 1 (otherwise
+   batching gives nothing) and small (a short generation). Use Little's law to calculate how many claims a 50 ms window collects at 30/s.
+6. Restart, repeat step 3. In my run: a single request **0.79 s** (batch wait 53 ms), 30 concurrent →
+   batches of **14 and 16**, wait max 50 ms; `check.py ex16`: a single request 0.60 s, batch max 16.
 
-   U mnie (okno 2 s / wsad 100 → 50 ms / 16): pojedyncza prośba **2.78 s → 0.54 s**; ruch otwarty 30/s × 10 s:
-   wsady ~60, 5 wywołań, p99 4.50 s → wsady p50 2 / max 5, 146 wywołań, p99 1.14 s.
+   In my run (window 2 s / batch 100 → 50 ms / 16): a single request **2.78 s → 0.54 s**; open traffic 30/s × 10 s:
+   batches ~60, 5 calls, p99 4.50 s → batches p50 2 / max 5, 146 calls, p99 1.14 s.
 7. `python check.py ex16`
 
-## Kryteria „done”
-- [ ] Pojedyncza prośba < 1.2 s; przy 30 równoczesnych wsad > 1 i ≤ 32.
-- [ ] Umiesz podać koszt i zysk swojego okna: ile ms dokłada, ile razy zmniejsza liczbę wywołań.
-- [ ] `python check.py ex16` przechodzi.
+## Definition of done
+- [ ] A single request < 1.2 s; with 30 concurrent a batch > 1 and ≤ 32.
+- [ ] You can state the cost and the gain of your window: how many ms it adds, by how much it reduces the number of calls.
+- [ ] `python check.py ex16` passes.
 
-## Pytania kontrolne
-1. Po zmianie liczba wywołań LLM wzrosła z 5 do 146. Dlaczego to dobry wynik? Kiedy byłby zły?
-2. Dostawca ma limit ITPM. Co dzieje się z wsadem 100 zgłoszeń, gdy zostało 20% limitu, a co z wsadem 5?
-3. Jak dobrać okno, gdy SLO priorytetu to p99 < 1 s, a ruch zmienia się w ciągu dnia od 0.1/s do 50/s?
+## Review questions
+1. After the change the number of LLM calls rose from 5 to 146. Why is that a good result? When would it be a bad one?
+2. The provider has an ITPM limit. What happens to a batch of 100 claims when 20% of the limit is left, and what happens to a batch of 5?
+3. How do you choose the window when the priority SLO is p99 < 1 s and traffic varies during the day from 0.1/s to 50/s?
 
-Odpowiedzi: `solutions/pytania_odpowiedzi.md`.
+Answers: `solutions/questions_answers.md`.
 
-## ★ Bonus (opcjonalnie)
-Okno adaptacyjne: wysyłaj natychmiast, jeśli od poprzedniego wsadu minęło > X ms i nikt nie czeka; zbieraj
-dopiero, gdy wywołanie jest w toku (wsad „z tego, co narosło w trakcie”). Porównaj oba końce z wersją stałego okna.
+## ★ Bonus (optional)
+An adaptive window: send immediately if more than X ms have passed since the previous batch and nobody is waiting; collect
+only while a call is in progress (a batch "from whatever accumulated in the meantime"). Compare both ends with the
+fixed-window version.
 
 ---
-Utknąłeś? `solutions/hints/ex16_hint1.md` → `hint2` → `hint3`. Gotowe rozwiązanie:
-`solutions/ex16_wsad.py` → `app/wsad.py`.
+Stuck? `solutions/hints/ex16_hint1.md` → `hint2` → `hint3`. The ready solution:
+`solutions/ex16_batch.py` → `app/batch.py`.

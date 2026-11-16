@@ -1,6 +1,6 @@
-# Ćw. 16 — podpowiedź 2 (metryki)
+# Ex. 16 — hint 2 (metrics)
 
-- Odpowiedź `POST /claims/{n}/priority` niesie `rozmiar_wsadu` i `czekanie_na_wsad_ms`.
-- Prometheus: `sum(app_batch_size_sum) / sum(app_batch_size_count)` — średni wsad od startu procesu.
-- Little: okno T przy λ próśb/s zbiera średnio λ·T zgłoszeń (30/s × 0.05 s ≈ 1.5; w burście 30 naraz — więcej).
-- Kryteria checka: pojedyncza < 1.2 s, przy 30 równoległych 1 < wsad ≤ 32.
+- The response of `POST /claims/{n}/priority` carries `batch_size` and `batch_wait_ms`.
+- Prometheus: `sum(app_batch_size_sum) / sum(app_batch_size_count)` — the average batch since the process start.
+- Little: a window T at λ requests/s collects on average λ·T claims (30/s × 0.05 s ≈ 1.5; in a burst of 30 at once — more).
+- The check's criteria: a single request < 1.2 s, with 30 parallel 1 < batch ≤ 32.
