@@ -3,35 +3,38 @@
 Liczby w odpowiedziach pochodzą z pomiarów autora (te same polecenia co w ćwiczeniach). U Ciebie będą
 inne w szczegółach — ważny jest kierunek i rząd wielkości.
 
-## Ćw. 01 — pierwszy trace
-1. `start_span` bez aktywacji nie ustawia spanu jako bieżącego kontekstu, więc kolejny span (`llm.call`) nie
-   staje się jego dzieckiem. Gdyby czekanie było aktywne (`start_as_current_span`), `llm.call` wisiałby pod
-   `llm.queue_wait`, a w widoku trace czekanie „zawierałoby” wywołanie — fałszywy obraz: czas czekania i czas
-   pracy zlałyby się w jeden pasek.
-2. 40 żądań / 4 sloty = 10 „tur” po ~1 s → ostatnie czeka ~9 s i kończy po ~10 s. To prawo Little'a w wersji
-   dla jednej fali: czas czekania = (pozycja w kolejce / liczba slotów) × czas obsługi.
-3. `Server-Timing` czyta klient (przeglądarka DevTools, k6 — trendy `app_czekanie_*`) bez dostępu do backendu
-   telemetrii; trace czyta zespół aplikacji — z kontekstem (który dostawca, ponowienia, spany SDK). Ten sam
-   podział widziany z dwóch stron pozwala klientowi zgłosić „czekałem na slot 3 s”, a Tobie znaleźć ten trace.
+## Ex. 01 — the first trace
+1. `start_span` without activation does not set the span as the current context, so the next span
+   (`llm.call`) does not become its child. Had the wait been active (`start_as_current_span`), `llm.call` would
+   hang under `llm.queue_wait`, and in the trace view the wait would "contain" the call — a false picture:
+   waiting time and working time would merge into one bar.
+2. 40 requests / 4 slots = 10 "rounds" of ~1 s → the last one waits ~9 s and finishes after ~10 s. That is
+   Little's law in the single-wave version: wait time = (position in the queue / number of slots) × service time.
+3. `Server-Timing` is read by the client (browser DevTools, k6 — the `app_wait_*` trends) with no access to the
+   telemetry backend; the trace is read by the application team — with context (which provider, retries, SDK
+   spans). The same breakdown seen from two sides lets the client report "I waited 3 s for a slot" and lets you
+   find that trace.
 
-## Ćw. 02 — model otwarty vs zamknięty
-1. 4 VU = najwyżej 4 żądania w systemie naraz; każde dostaje slot od razu, bo poprzednie zwolnione zanim VU
-   wyśle następne. Kolejka nie może powstać — generator sam dopasowuje tempo do pojemności (coordinated omission).
-2. k6 nie miał wolnego VU w chwili planowanego startu iteracji i ją pominął — model przestał być otwarty
-   dokładnie wtedy, gdy system zwalniał. Wynik zaniża ogon tak samo jak model zamknięty; trzeba dać więcej
-   `preAllocatedVUs`/`maxVUs` (≥ tempo × najdłuższy czas odpowiedzi) i powtórzyć.
-3. Gdy populacja klientów jest naprawdę zamknięta i czeka na odpowiedź: np. kilku likwidatorów, którzy klikają
-   „następne zgłoszenie” dopiero po przeczytaniu streszczenia, albo worker kolejki zadań z ustaloną
-   współbieżnością (ćw. 14). Ruch z internetu / od innych systemów — otwarty.
+## Ex. 02 — open vs closed model
+1. 4 VUs = at most 4 requests in the system at once; each gets a slot right away, because the previous ones are
+   released before the VU sends the next. A queue cannot form — the generator itself adjusts its rate to the
+   capacity (coordinated omission).
+2. k6 had no free VU at the moment an iteration was scheduled to start and skipped it — the model stopped being
+   open exactly when the system slowed down. The result understates the tail just like the closed model does;
+   you need to give it more `preAllocatedVUs`/`maxVUs` (≥ rate × the longest response time) and repeat.
+3. When the client population really is closed and waits for the response: e.g. a few claims adjusters who click
+   "next claim" only after reading the summary, or a task queue worker with a fixed concurrency (ex. 14).
+   Traffic from the internet / from other systems — open.
 
-## Ćw. 03 — prawo Little'a
-1. Pojemność 32 / 1.06 s ≈ 30.2/s; nadwyżka 40 − 30.2 ≈ 9.8/s × 60 s ≈ **590 czeka** po minucie (bez limitu
-   kolejki). Ostatnie z nich czeka ≈ 590 / 30.2 ≈ **19.5 s** (a z każdą sekundą dłużej).
-2. Sloty trzyma tylko wywołanie LLM (W w L = λ·W to czas trzymania zasobu). Czas z k6 zawiera czekanie na slot —
-   gdybyś go użył, przy przeciążeniu „potrzebnych slotów” wychodziłoby coraz więcej (sprzężenie zwrotne).
-3. Kolano przesunie się 3× w lewo (pojemność ~10/s zamiast ~30/s). Trzy razy więcej slotów to 3× więcej
-   równoległych połączeń, pamięci na odpowiedzi w toku i — przede wszystkim — współbieżności u dostawcy,
-   której limit (moc, ITPM/OTPM) może być niższy niż Twoje sloty.
+## Ex. 03 — Little's law
+1. Capacity 32 / 1.06 s ≈ 30.2/s; excess 40 − 30.2 ≈ 9.8/s × 60 s ≈ **590 waiting** after a minute (with no
+   queue limit). The last of them waits ≈ 590 / 30.2 ≈ **19.5 s** (and longer with every second).
+2. Slots are held only by the LLM call (W in L = λ·W is the time the resource is held). The time from k6
+   includes the slot wait — had you used it, under overload the "slots needed" would keep growing
+   (a feedback loop).
+3. The knee will shift 3× to the left (capacity ~10/s instead of ~30/s). Three times more slots means 3× more
+   parallel connections, memory for in-flight responses and — above all — concurrency at the provider, whose
+   limit (capacity, ITPM/OTPM) may be lower than your slots.
 
 ## Ćw. 04 — synchroniczny klient w `async def`
 1. Wąskim gardłem nie jest semafor, tylko pętla zdarzeń: blokujące wywołanie zatrzymuje cały proces, więc
@@ -187,13 +190,13 @@ inne w szczegółach — ważny jest kierunek i rząd wielkości.
 
 ## Mini-incydenty
 
-### Mini-I (po bloku I) — „raport mówi OK, klienci mówią co innego”
-- **Objaw:** k6 zamknięty 4 VU: p99 1.61 s, czekanie 0; ruch otwarty 4/s: p99 2.58 s, czekanie p99 1.46 s.
-- **Ślad:** `max(llm_inflight{klasa="krotkie"})` = 4, `llm_waiting` > 0, `llm_queue_wait_seconds` rośnie, a
-  `mock_llm_generating` ≤ 4 (dostawca niedociążony). `check.py ex06`: czekanie p50 21.3 s / p99 42.7 s przy
+### Mini-I (after Block I) — "the report says OK, customers say otherwise"
+- **Symptom:** k6 closed, 4 VUs: p99 1.61 s, wait 0; open traffic 4/s: p99 2.58 s, wait p99 1.46 s.
+- **Evidence:** `max(llm_inflight{request_class="short"})` = 4, `llm_waiting` > 0, `llm_queue_wait_seconds` grows, and
+  `mock_llm_generating` ≤ 4 (the provider is underloaded). `check.py ex06`: wait p50 21.3 s / p99 42.7 s with
   LLM 1.07 s.
-- **Przyczyna:** 4 sloty — pojemność ~3.8/s. Model zamknięty dopasował się do pojemności (coordinated omission).
-- **Naprawa:** sloty z Little'a (4/s × 1.05 s ≈ 4.2 → z zapasem 8; na 20/s → 32) + raporty z modelu otwartego.
+- **Cause:** 4 slots — capacity ~3.8/s. The closed model adjusted itself to the capacity (coordinated omission).
+- **Fix:** slots from Little's law (4/s × 1.05 s ≈ 4.2 → 8 with headroom; for 20/s → 32) + reports from the open model.
 
 ### Mini-II (po bloku II) — „pisma raz 2 s, raz 4 s”
 - **Objaw:** 60 równoczesnych pism: dwie grupy czasów (~2.3 s i ~4.4 s), nic pomiędzy.
