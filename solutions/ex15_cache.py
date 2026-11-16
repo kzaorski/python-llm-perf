@@ -1,9 +1,9 @@
-"""[ROZWIĄZANIE ćw. 15 — kopiuj do app/cache.py] Odpowiedzi na częste pytania klientów (FAQ) z cache w Redisie — endpoint GET /faq?q=…
+"""[SOLUTION ex. 15 — copy to app/cache.py] Answers to frequently asked customer questions (FAQ) with a Redis cache — endpoint GET /faq?q=…
 
-Ćw. 15 (W10): cache bez single-flight. Gdy klucz wygaśnie (albo jeszcze go nie ma), każde z N
-równoczesnych identycznych pytań widzi „miss" i SAMO woła LLM — N wywołań zamiast jednego
-(cache stampede). Przy popularnym pytaniu to fala ruchu do dostawcy co TTL sekund.
-✅ ćw. 15: single-flight (w procesie Future, między procesami blokada SET NX w Redisie).
+Ex. 15 (F10): a cache without single-flight. When a key expires (or does not exist yet), each of N
+concurrent identical questions sees a "miss" and calls the LLM ITSELF — N calls instead of one
+(cache stampede). With a popular question that is a wave of traffic to the provider every TTL seconds.
+✅ ex. 15: single-flight (an in-process Future, across processes a SET NX lock in Redis).
 """
 from __future__ import annotations
 
@@ -14,77 +14,77 @@ import os
 import redis.asyncio as aioredis
 from fastapi import APIRouter, Request
 
-from . import config, obsluga, telemetry
-from .llm import Zadanie
+from . import config, pipeline, telemetry
+from .llm import LLMJob
 
 router = APIRouter()
 r = aioredis.from_url(config.REDIS_URL, decode_responses=True)
 TTL_S = int(os.environ.get("FAQ_TTL_S", "60"))
 
 
-def klucz(q: str) -> str:
+def cache_key(q: str) -> str:
     return "faq:" + hashlib.sha1(q.strip().lower().encode()).hexdigest()[:16]
 
 
-async def policz(q: str, request: Request) -> str:
-    z = Zadanie(klasa="krotkie", endpoint="faq", max_tokens=300,
-                prompt=f"Odpowiedz klientowi ubezpieczyciela na pytanie: {q}",
-                naglowki=obsluga.naglowki_atrapy(request))
-    return (await obsluga.wykonaj(request, z)).tekst
+async def compute(q: str, request: Request) -> str:
+    z = LLMJob(request_class="short", endpoint="faq", max_tokens=300,
+               prompt=f"Answer the insurance customer's question: {q}",
+               headers=pipeline.mock_headers(request))
+    return (await pipeline.execute(request, z)).text
 
 
-_w_toku: dict[str, asyncio.Future] = {}
-BLOKADA_S = 30            # blokada międzyprocesowa: dłużej niż deadline krótkich (30 s)
+_inflight: dict[str, asyncio.Future] = {}
+LOCK_S = 30            # a cross-process lock: longer than the short-class deadline (30 s)
 
 
-async def pobierz_albo_policz(k: str, q: str, request: Request) -> tuple[str, str]:
-    """ćw. 15 (W10) ✅ single-flight: jedno wywołanie LLM na klucz, reszta czeka na jego wynik.
+async def get_or_compute(k: str, q: str, request: Request) -> tuple[str, str]:
+    """ex. 15 (F10) ✅ single-flight: one LLM call per key, the rest wait for its result.
 
-    1) w procesie: słownik klucz → Future (pierwszy liczy, pozostali `await` na tym samym Future);
-    2) między procesami (np. kilka workerów gunicorna): blokada w Redisie `SET … NX PX` — kto nie
-       zdobył blokady, czeka, aż wartość pojawi się w cache (odpytywanie co 50 ms).
-    Zwraca (odpowiedź, skąd) — skąd: hit | miss | wspolne (czekał na cudze wywołanie).
+    1) in the process: a dict key → Future (the first one computes, the others `await` the same Future);
+    2) across processes (e.g. several gunicorn workers): a lock in Redis `SET … NX PX` — whoever did not
+       get the lock waits until the value appears in the cache (polling every 50 ms).
+    Returns (answer, source) — source: hit | miss | shared (waited for someone else's call).
     """
     v = await r.get(k)
     if v is not None:
-        telemetry.zapisz(telemetry.C_CACHE, 1, wynik="hit")
+        telemetry.record(telemetry.C_CACHE, 1, outcome="hit")
         return v, "hit"
-    if k in _w_toku:
-        telemetry.zapisz(telemetry.C_CACHE, 1, wynik="wspolne")
-        return await asyncio.shield(_w_toku[k]), "wspolne"
+    if k in _inflight:
+        telemetry.record(telemetry.C_CACHE, 1, outcome="shared")
+        return await asyncio.shield(_inflight[k]), "shared"
     fut = asyncio.get_running_loop().create_future()
-    _w_toku[k] = fut
+    _inflight[k] = fut
     try:
-        if await r.set(k + ":blokada", "1", nx=True, px=BLOKADA_S * 1000):
+        if await r.set(k + ":lock", "1", nx=True, px=LOCK_S * 1000):
             try:
-                telemetry.zapisz(telemetry.C_CACHE, 1, wynik="miss")
-                v = await policz(q, request)
+                telemetry.record(telemetry.C_CACHE, 1, outcome="miss")
+                v = await compute(q, request)
                 await r.set(k, v, ex=TTL_S)
-                skad = "miss"
+                source = "miss"
             finally:
-                await r.delete(k + ":blokada")
-        else:                                   # liczy inny proces — czekamy na wynik w cache
-            telemetry.zapisz(telemetry.C_CACHE, 1, wynik="wspolne")
-            skad = "wspolne"
-            for _ in range(BLOKADA_S * 20):
+                await r.delete(k + ":lock")
+        else:                                   # another process is computing — we wait for the result in the cache
+            telemetry.record(telemetry.C_CACHE, 1, outcome="shared")
+            source = "shared"
+            for _ in range(LOCK_S * 20):
                 v = await r.get(k)
                 if v is not None:
                     break
                 await asyncio.sleep(0.05)
             else:
-                v = await policz(q, request)    # właściciel blokady padł — liczymy sami
+                v = await compute(q, request)    # the lock owner died — we compute it ourselves
         fut.set_result(v)
-        return v, skad
+        return v, source
     except BaseException as e:
         if not fut.done():
             fut.set_exception(e)
-            fut.exception()                     # oznacz jako odczytany (brak ostrzeżeń asyncio)
+            fut.exception()                     # mark as retrieved (no asyncio warnings)
         raise
     finally:
-        _w_toku.pop(k, None)
+        _inflight.pop(k, None)
 
 
 @router.get("/faq")
 async def faq(q: str, request: Request):
-    v, skad = await pobierz_albo_policz(klucz(q), q, request)
-    return {"pytanie": q, "odpowiedz": v, "cache": skad}
+    v, source = await get_or_compute(cache_key(q), q, request)
+    return {"question": q, "answer": v, "cache": source}

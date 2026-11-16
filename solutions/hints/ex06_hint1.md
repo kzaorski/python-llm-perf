@@ -1,5 +1,6 @@
-# Ćw. 06 — podpowiedź 1 (kierunek)
+# Ex. 06 — hint 1 (direction)
 
-Żądanie czeka 30–60 s, choć samo wywołanie LLM trwa 1 s, a atrapa jest prawie bezczynna. Zasób, na który
-się czeka, jest po naszej stronie. Policz z Little'a, ile wywołań naraz potrzeba przy 20/s i ~1 s, i porównaj
-z liczbą slotów aplikacji. Sprawdź też drugi „ukryty” limit: pulę połączeń klienta HTTP.
+The request waits 30–60 s although the LLM call itself takes 1 s and the mock is almost idle. The resource
+being waited for is on our side. Use Little's law to compute how many calls at once you need at 20/s and
+~1 s, and compare that with the application's number of slots. Also check the second "hidden" limit: the HTTP
+client's connection pool.

@@ -1,24 +1,24 @@
-"""Telemetria aplikacji: OpenTelemetry (trace + metryki przez OTLP/HTTP) i opcjonalnie Pyroscope.
+"""Telemetry for the app: OpenTelemetry (traces + metrics over OTLP/HTTP) and, optionally, Pyroscope.
 
-Ten moduł DZIAŁA od startu — nie jest tematem żadnego ćwiczenia. Definiuje instrumenty,
-z których korzystają pozostałe moduły (nazwy w Prometheusie po konwersji OTLP w nawiasach):
+This module WORKS from startup — it is not a topic of any exercise. It defines the instruments
+that the other modules use (Prometheus names after OTLP conversion in parentheses):
 
-- `llm.queue.wait`      [s]  czas czekania na slot LLM, atrybut `klasa`      (`llm_queue_wait_seconds_*`) — ćw. 01
-- `llm.call.duration`   [s]  czas jednego wywołania LLM (bez czekania)      (`llm_call_duration_seconds_*`)
-- `llm.ttft`            [s]  czas do pierwszego tokenu (ścieżki strumieniowe) (`llm_ttft_seconds_*`)
-- `app.request.duration`[s]  czas end-to-end żądania (czekanie + obsługa)   (`app_request_duration_seconds_*`)
-- `app.requests`             wynik żądania: ok / odrzucone / przeterminowane / anulowane / blad_dostawcy /
-                             timeout_dostawcy / limit_dostawcy                (`app_requests_total`)
-- `llm.http.attempts`        każda próba HTTP do dostawcy (także ponowienia SDK) (`llm_http_attempts_total`)
-- `llm.http.responses`       odpowiedzi dostawcy wg statusu                   (`llm_http_responses_total`)
-- `llm.waiting` / `llm.inflight` / `llm.oldest_waiting_age` — stan kolejki do LLM per klasa (gauge)
-- `app.event_loop.lag`  [s]  opóźnienie pętli zdarzeń (próbkowane co 100 ms)  (`app_event_loop_lag_seconds_*`)
-- `app.stream.first_chunk` [s] od wejścia żądania do wysłania klientowi PIERWSZEGO fragmentu strumienia
-                             (`app_stream_first_chunk_seconds_*`) — porównaj z `llm.ttft` (ćw. 13)
+- `llm.queue.wait`      [s]  time waiting for an LLM slot, attribute `request_class`  (`llm_queue_wait_seconds_*`) — ex. 01
+- `llm.call.duration`   [s]  time of one LLM call (without waiting)                   (`llm_call_duration_seconds_*`)
+- `llm.ttft`            [s]  time to first token (streaming paths)                    (`llm_ttft_seconds_*`)
+- `app.request.duration`[s]  end-to-end request time (waiting + service)              (`app_request_duration_seconds_*`)
+- `app.requests`             request outcome: ok / rejected / deadline_exceeded / cancelled / provider_error /
+                             provider_timeout / provider_rate_limited                 (`app_requests_total`)
+- `llm.http.attempts`        every HTTP attempt to the provider (including SDK retries) (`llm_http_attempts_total`)
+- `llm.http.responses`       provider responses by status                             (`llm_http_responses_total`)
+- `llm.waiting` / `llm.inflight` / `llm.oldest_waiting_age` — state of the LLM queue per class (gauge)
+- `app.event_loop.lag`  [s]  event loop delay (sampled every 100 ms)                  (`app_event_loop_lag_seconds_*`)
+- `app.stream.first_chunk` [s] from the request entering to the FIRST stream chunk being sent to the client
+                             (`app_stream_first_chunk_seconds_*`) — compare with `llm.ttft` (ex. 13)
 
-Zmienne: OTEL_SERVICE_NAME (domyślnie claims-assistant), OTEL_EXPORTER_OTLP_ENDPOINT,
-APP_WARIANT (etykieta wariantu uruchomienia, np. uvicorn / gunicorn-uvicorn), PYROSCOPE=1 (profilowanie),
-PYROSCOPE_WALL=1 (tryb wall-clock zamiast CPU).
+Variables: OTEL_SERVICE_NAME (default claims-assistant), OTEL_EXPORTER_OTLP_ENDPOINT,
+APP_VARIANT (label of the run variant, e.g. uvicorn / gunicorn-uvicorn), PYROSCOPE=1 (profiling),
+PYROSCOPE_WALL=1 (wall-clock mode instead of CPU).
 """
 from __future__ import annotations
 
@@ -37,51 +37,51 @@ from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
-from . import stan
+from . import state
 
 SERVICE = os.environ.get("OTEL_SERVICE_NAME", "claims-assistant")
-WARIANT = os.environ.get("APP_WARIANT", "uvicorn")
+VARIANT = os.environ.get("APP_VARIANT", "uvicorn")
 os.environ.setdefault("OTEL_EXPORTER_OTLP_ENDPOINT", "http://127.0.0.1:4368")
 os.environ.setdefault("OTEL_EXPORTER_OTLP_PROTOCOL", "http/protobuf")
 
-# Kubełki w sekundach: od milisekund (odrzucenia) po wywołania wielominutowe (do 300+ s).
-KUBELKI_S = (0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 0.75, 1, 1.5, 2, 3, 5, 7.5, 10, 15, 20, 30,
+# Buckets in seconds: from milliseconds (rejections) to multi-minute calls (300+ s).
+BUCKETS_S = (0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 0.75, 1, 1.5, 2, 3, 5, 7.5, 10, 15, 20, 30,
              45, 60, 90, 120, 150, 180, 240, 300, 360, 480)
 
-_gotowe = False
+_ready = False
 tracer = trace.get_tracer("claims-assistant")
 meter = metrics.get_meter("claims-assistant")
 
 
-def konfiguruj(service: str | None = None, wariant: str | None = None) -> None:
-    """Ustawia providery OTel (raz na proces). Wołane przy imporcie app.main i w workerze.
+def configure(service: str | None = None, variant: str | None = None) -> None:
+    """Sets up the OTel providers (once per process). Called on import of app.main and in the worker.
 
-    `wariant` = domyślna etykieta procesu (np. worker), gdy nie ustawiono APP_WARIANT."""
-    global _gotowe, tracer, meter, SERVICE, WARIANT
-    if _gotowe:
+    `variant` = the default process label (e.g. worker) when APP_VARIANT is not set."""
+    global _ready, tracer, meter, SERVICE, VARIANT
+    if _ready:
         return
     if service:
         SERVICE = service
-    if wariant and "APP_WARIANT" not in os.environ:
-        WARIANT = wariant
-    _gotowe = True
-    res = Resource.create({"service.name": SERVICE, "service.instance.id": f"{WARIANT}-{os.getpid()}",
-                           "app.wariant": WARIANT})
+    if variant and "APP_VARIANT" not in os.environ:
+        VARIANT = variant
+    _ready = True
+    res = Resource.create({"service.name": SERVICE, "service.instance.id": f"{VARIANT}-{os.getpid()}",
+                           "app.variant": VARIANT})
     tp = TracerProvider(resource=res)
     tp.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))
     if os.environ.get("PYROSCOPE", "0") == "1":
         _pyroscope(tp)
     trace.set_tracer_provider(tp)
-    views = [View(instrument_type=None, instrument_name=n, aggregation=ExplicitBucketHistogramAggregation(KUBELKI_S))
+    views = [View(instrument_type=None, instrument_name=n, aggregation=ExplicitBucketHistogramAggregation(BUCKETS_S))
              for n in ("llm.queue.wait", "llm.call.duration", "llm.ttft", "app.request.duration",
-                       "app.event_loop.lag", "app.stream.first_chunk", "zadania.czas", "zadania.czekanie")]
+                       "app.event_loop.lag", "app.stream.first_chunk", "tasks.duration", "tasks.wait")]
     mp = MeterProvider(resource=res, views=views,
                        metric_readers=[PeriodicExportingMetricReader(OTLPMetricExporter(), export_interval_millis=5000)])
     metrics.set_meter_provider(mp)
     tracer = trace.get_tracer("claims-assistant")
     meter = metrics.get_meter("claims-assistant")
-    _instrumenty()
-    # Klient HTTP SDK anthropic 2.x stoi na httpx2 — HTTPXClientInstrumentor go NIE widzi.
+    _instruments()
+    # The HTTP client of the anthropic 2.x SDK is built on httpx2 — HTTPXClientInstrumentor does NOT see it.
     from opentelemetry.instrumentation.httpx import HTTPX2ClientInstrumentor
     HTTPX2ClientInstrumentor().instrument()
 
@@ -93,59 +93,59 @@ def _pyroscope(tp: TracerProvider) -> None:
     pyroscope.configure(application_name=SERVICE,
                         server_address=os.environ.get("PYROSCOPE_URL", "http://127.0.0.1:4060"),
                         oncpu=not wall, gil_only=not wall,
-                        tags={"wariant": WARIANT, "tryb": "wall" if wall else "cpu"})
+                        tags={"variant": VARIANT, "mode": "wall" if wall else "cpu"})
     tp.add_span_processor(PyroscopeSpanProcessor())
 
 
-# Instrumenty — tworzone w konfiguruj(); do tego czasu atrapy no-op (import bez skutków ubocznych).
-H_CZEKANIE = H_WYWOLANIE = H_TTFT = H_ZADANIE = H_LAG = H_PIERWSZY = None
-C_ZADANIA = C_PROBY = C_ODPOWIEDZI = C_CACHE = None
-H_WSAD = None
+# Instruments — created in configure(); until then no-op placeholders (importing has no side effects).
+H_QUEUE_WAIT = H_CALL = H_TTFT = H_REQUEST = H_LAG = H_FIRST_CHUNK = None
+C_REQUESTS = C_ATTEMPTS = C_RESPONSES = C_CACHE = None
+H_BATCH = None
 
 
-def _instrumenty() -> None:
-    global H_CZEKANIE, H_WYWOLANIE, H_TTFT, H_ZADANIE, H_LAG, H_PIERWSZY, C_ZADANIA, C_PROBY, C_ODPOWIEDZI, C_CACHE, H_WSAD
-    H_CZEKANIE = meter.create_histogram("llm.queue.wait", unit="s", description="Czas czekania na slot LLM")
-    H_WYWOLANIE = meter.create_histogram("llm.call.duration", unit="s", description="Czas wywołania LLM (obsługa)")
-    H_TTFT = meter.create_histogram("llm.ttft", unit="s", description="Czas do pierwszego tokenu")
-    H_ZADANIE = meter.create_histogram("app.request.duration", unit="s", description="Czas end-to-end żądania")
-    H_LAG = meter.create_histogram("app.event_loop.lag", unit="s", description="Opóźnienie pętli zdarzeń")
-    H_PIERWSZY = meter.create_histogram("app.stream.first_chunk", unit="s",
-                                        description="Od wejścia żądania do wysłania pierwszego fragmentu strumienia")
-    H_WSAD = meter.create_histogram("app.batch.size", unit="1", description="Rozmiar wsadu wysłanego do LLM")
-    C_ZADANIA = meter.create_counter("app.requests", description="Żądania wg wyniku")
-    C_PROBY = meter.create_counter("llm.http.attempts", description="Próby HTTP do dostawcy (z ponowieniami SDK)")
-    C_ODPOWIEDZI = meter.create_counter("llm.http.responses", description="Odpowiedzi dostawcy wg statusu")
-    C_CACHE = meter.create_counter("app.cache", description="Cache odpowiedzi: hit / miss / czekanie")
+def _instruments() -> None:
+    global H_QUEUE_WAIT, H_CALL, H_TTFT, H_REQUEST, H_LAG, H_FIRST_CHUNK, C_REQUESTS, C_ATTEMPTS, C_RESPONSES, C_CACHE, H_BATCH
+    H_QUEUE_WAIT = meter.create_histogram("llm.queue.wait", unit="s", description="Time waiting for an LLM slot")
+    H_CALL = meter.create_histogram("llm.call.duration", unit="s", description="LLM call time (service)")
+    H_TTFT = meter.create_histogram("llm.ttft", unit="s", description="Time to first token")
+    H_REQUEST = meter.create_histogram("app.request.duration", unit="s", description="End-to-end request time")
+    H_LAG = meter.create_histogram("app.event_loop.lag", unit="s", description="Event loop delay")
+    H_FIRST_CHUNK = meter.create_histogram("app.stream.first_chunk", unit="s",
+                                           description="From the request entering to the first stream chunk being sent")
+    H_BATCH = meter.create_histogram("app.batch.size", unit="1", description="Size of the batch sent to the LLM")
+    C_REQUESTS = meter.create_counter("app.requests", description="Requests by outcome")
+    C_ATTEMPTS = meter.create_counter("llm.http.attempts", description="HTTP attempts to the provider (with SDK retries)")
+    C_RESPONSES = meter.create_counter("llm.http.responses", description="Provider responses by status")
+    C_CACHE = meter.create_counter("app.cache", description="Response cache: hit / miss / shared")
 
-    def _obs(atrybut):
+    def _obs(attribute):
         def cb(_opts):
-            return [Observation(atrybut(s), {"klasa": k}) for k, s in stan.STAN.items()]
+            return [Observation(attribute(s), {"request_class": k}) for k, s in state.STATE.items()]
         return cb
 
-    meter.create_observable_gauge("llm.waiting", [_obs(lambda s: s.liczba_czekajacych)],
-                                  description="Żądania czekające na slot LLM")
-    meter.create_observable_gauge("llm.inflight", [_obs(lambda s: s.w_toku)],
-                                  description="Wywołania LLM w toku")
-    meter.create_observable_gauge("llm.oldest_waiting_age", [_obs(lambda s: s.wiek_najstarszego)], unit="s",
-                                  description="Wiek najstarszego czekającego żądania")
+    meter.create_observable_gauge("llm.waiting", [_obs(lambda s: s.waiting_count)],
+                                  description="Requests waiting for an LLM slot")
+    meter.create_observable_gauge("llm.inflight", [_obs(lambda s: s.inflight)],
+                                  description="LLM calls in flight")
+    meter.create_observable_gauge("llm.oldest_waiting_age", [_obs(lambda s: s.oldest_age)], unit="s",
+                                  description="Age of the oldest waiting request")
 
 
-def zapisz(instrument, wartosc: float, **atrybuty) -> None:
-    """Bezpieczny zapis (instrument może być None, gdy telemetria nie została skonfigurowana)."""
+def record(instrument, value: float, **attributes) -> None:
+    """Safe recording (the instrument may be None when telemetry has not been configured)."""
     if instrument is None:
         return
     if hasattr(instrument, "record"):
-        instrument.record(wartosc, atrybuty)
+        instrument.record(value, attributes)
     else:
-        instrument.add(wartosc, atrybuty)
+        instrument.add(value, attributes)
 
 
-async def monitor_petli(okres_s: float = 0.1) -> None:
-    """Mierzy, o ile później niż zaplanowano budzi się pętla zdarzeń (blokada pętli = duży lag)."""
+async def monitor_loop(period_s: float = 0.1) -> None:
+    """Measures how much later than scheduled the event loop wakes up (loop blocking = large lag)."""
     while True:
         t0 = time.perf_counter()
-        await asyncio.sleep(okres_s)
-        lag = max(0.0, time.perf_counter() - t0 - okres_s)
-        stan.PETLA.zapisz(lag)
-        zapisz(H_LAG, lag)
+        await asyncio.sleep(period_s)
+        lag = max(0.0, time.perf_counter() - t0 - period_s)
+        state.LOOP_LAG.record(lag)
+        record(H_LAG, lag)

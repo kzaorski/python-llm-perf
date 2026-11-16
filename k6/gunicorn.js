@@ -1,27 +1,27 @@
-// Ćw. 07 — porównanie modeli procesów gunicorna (port 8062) w modelu otwartym.
+// Ex. 07 — comparing gunicorn process models (port 8062) in the open model.
 //
-//   docker compose run --rm k6 run -o experimental-prometheus-rw /scripts/gunicorn.js -e RATE=20 -e CZAS=60s
-//   (-e SCIEZKA=reply — dłuższe odpowiedzi ~3.3 s; -e WARIANT=sync|uvicorn trafia do tagu)
+//   docker compose run --rm k6 run -o experimental-prometheus-rw /scripts/gunicorn.js -e RATE=20 -e DURATION=60s
+//   (-e ENDPOINT_PATH=reply — longer responses ~3.3 s; -e VARIANT=sync|uvicorn goes into the tag)
 import http from 'k6/http';
-import { podsumowanie, zapisz } from './lib.js';
+import { summarize, record } from './lib.js';
 
 const URL = __ENV.GUNICORN_URL || 'http://host.docker.internal:8062';
-const SCIEZKA = __ENV.SCIEZKA || 'summary';
+const ENDPOINT_PATH = __ENV.ENDPOINT_PATH || 'summary';
 
 export const options = {
   scenarios: {
     gunicorn: { executor: 'constant-arrival-rate', rate: parseInt(__ENV.RATE || '20'), timeUnit: '1s',
-                duration: __ENV.CZAS || '60s', preAllocatedVUs: 200, maxVUs: 3000, gracefulStop: '420s' },
+                duration: __ENV.DURATION || '60s', preAllocatedVUs: 200, maxVUs: 3000, gracefulStop: '420s' },
   },
-  tags: { cwiczenie: '07', wariant: __ENV.WARIANT || 'nieznany' },
+  tags: { exercise: '07', variant: __ENV.VARIANT || 'unknown' },
   summaryTrendStats: ['avg', 'p(50)', 'p(90)', 'p(99)', 'max', 'count'],
 };
 
 export default function () {
   const n = 1 + Math.floor(Math.random() * 20000);
   const headers = __ENV.TOTAL_S ? { 'x-mock-total-s': __ENV.TOTAL_S } : {};
-  const r = http.post(`${URL}/claims/${n}/${SCIEZKA}`, null, { headers, timeout: '400s', tags: { endpoint: SCIEZKA } });
-  zapisz(r, 'krotkie');
+  const r = http.post(`${URL}/claims/${n}/${ENDPOINT_PATH}`, null, { headers, timeout: '400s', tags: { endpoint: ENDPOINT_PATH } });
+  record(r, 'short');
 }
 
-export const handleSummary = podsumowanie(`ex07-gunicorn-${__ENV.WARIANT || 'nieznany'}`);
+export const handleSummary = summarize(`ex07-gunicorn-${__ENV.VARIANT || 'unknown'}`);

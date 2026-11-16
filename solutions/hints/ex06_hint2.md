@@ -1,7 +1,8 @@
-# Ćw. 06 — podpowiedź 2 (metryki)
+# Ex. 06 — hint 2 (metrics)
 
-- `max_over_time(llm_inflight{klasa="krotkie"}[2m])` przyklejone do 4; `llm_waiting` i
-  `llm_oldest_waiting_age_seconds` rosną; histogram `llm_queue_wait_seconds`; `/diag` → `kolejka`.
-- Druga strona: `max_over_time(mock_llm_generating{provider="a"}[2m])` — ile generacji naraz widzi dostawca.
-  Gdy semafor jest duży, a pula httpx2 mała (`LLM_POLACZENIA=8`), atrapa widzi ≤ 8, a czekanie w puli
-  NIE trafia do `llm.queue_wait` (i z pool timeoutem kończy się `APITimeoutError` — PoolTimeout).
+- `max_over_time(llm_inflight{request_class="short"}[2m])` pinned at 4; `llm_waiting` and
+  `llm_oldest_waiting_age_seconds` grow; the `llm_queue_wait_seconds` histogram; `/diag` → `queue`.
+- The other side: `max_over_time(mock_llm_generating{provider="a"}[2m])` — how many generations at once the
+  provider sees. When the semaphore is large and the httpx2 pool small (`LLM_CONNECTIONS=8`), the mock sees
+  ≤ 8, and the wait in the pool does NOT go into `llm.queue_wait` (and with a pool timeout it ends in
+  `APITimeoutError` — PoolTimeout).

@@ -1,12 +1,12 @@
-"""[ROZWIĄZANIE ćw. 11 — kopiuj do app/llm/fallback.py] Zapasowy dostawca z wyłącznikiem (circuit breaker).
+"""[SOLUTION ex. 11 — copy to app/llm/fallback.py] A fallback provider with a circuit breaker.
 
-Ćw. 11 (W12) ✅ — stany wyłącznika dostawcy `a`:
-- ZAMKNIĘTY: ruch idzie do `a`; liczymy kolejne awarie;
-- OTWARTY: po PROG_AWARII kolejnych awariach przez CZAS_OTWARCIA_S nie pytamy `a` wcale — od razu `b`
-  (żądanie nie płaci timeoutu `a`, a `a` dostaje czas na podniesienie się);
-- PÓŁOTWARTY: po czasie otwarcia JEDNO żądanie-próbka idzie do `a`; sukces zamyka wyłącznik,
-  porażka otwiera go ponownie.
-Stan wyłącznika: atrybut `llm.cb.stan` na spanie `llm.call` i w /diag (licznik zmian stanu).
+Ex. 11 (F12) ✅ — the states of the circuit breaker for provider `a`:
+- CLOSED: traffic goes to `a`; we count consecutive failures;
+- OPEN: after FAILURE_THRESHOLD consecutive failures, for OPEN_DURATION_S we do not ask `a` at all — straight to `b`
+  (the request does not pay `a`'s timeout, and `a` gets time to recover);
+- HALF-OPEN: after the open time ONE probe request goes to `a`; success closes the breaker,
+  failure opens it again.
+The breaker state: the `llm.cb.state` attribute on the `llm.call` span and in /diag (a counter of state changes).
 """
 from __future__ import annotations
 
@@ -16,70 +16,70 @@ import time
 import anthropic
 from opentelemetry import trace
 
-from .. import config, stan
-from . import Wynik, Zadanie, klient
+from .. import config, state
+from . import LLMJob, LLMResult, client
 
-BLEDY_AWARII = (anthropic.APIConnectionError, anthropic.InternalServerError)
-PROG_AWARII = int(os.environ.get("CB_PROG", "5"))
-CZAS_OTWARCIA_S = float(os.environ.get("CB_OTWARCIE_S", "30"))
+OUTAGE_ERRORS = (anthropic.APIConnectionError, anthropic.InternalServerError)
+FAILURE_THRESHOLD = int(os.environ.get("CB_THRESHOLD", "5"))
+OPEN_DURATION_S = float(os.environ.get("CB_OPEN_S", "30"))
 
 
-def _awaria(e: Exception) -> bool:
+def _is_outage(e: Exception) -> bool:
     if isinstance(e, anthropic.OverloadedError):
-        return False   # 529 overloaded = przeciążenie, nie awaria — fallback przeniósłby burzę na `b`
-    return isinstance(e, BLEDY_AWARII)
+        return False   # 529 overloaded = overload, not an outage — a fallback would move the storm to `b`
+    return isinstance(e, OUTAGE_ERRORS)
 
 
-class Wylacznik:
+class CircuitBreaker:
     def __init__(self) -> None:
-        self.stan = "zamkniety"
-        self.awarie = 0
-        self.otwarty_do = 0.0
-        self.probka_w_toku = False
+        self.state = "closed"
+        self.failures = 0
+        self.open_until = 0.0
+        self.probe_in_flight = False
 
-    def _ustaw(self, nowy: str) -> None:
-        if nowy != self.stan:
-            stan.WYNIKI[("cb", "a", f"{self.stan}->{nowy}")] += 1
-            self.stan = nowy
+    def _set_state(self, new_state: str) -> None:
+        if new_state != self.state:
+            state.OUTCOMES[("cb", "a", f"{self.state}->{new_state}")] += 1
+            self.state = new_state
 
-    def czy_pytac_a(self) -> bool:
-        if self.stan == "zamkniety":
+    def should_try_a(self) -> bool:
+        if self.state == "closed":
             return True
-        if self.stan == "otwarty" and time.monotonic() >= self.otwarty_do:
-            self._ustaw("polotwarty")
-        if self.stan == "polotwarty" and not self.probka_w_toku:
-            self.probka_w_toku = True
+        if self.state == "open" and time.monotonic() >= self.open_until:
+            self._set_state("half_open")
+        if self.state == "half_open" and not self.probe_in_flight:
+            self.probe_in_flight = True
             return True
         return False
 
-    def sukces(self) -> None:
-        self.awarie = 0
-        self.probka_w_toku = False
-        self._ustaw("zamkniety")
+    def success(self) -> None:
+        self.failures = 0
+        self.probe_in_flight = False
+        self._set_state("closed")
 
-    def awaria(self) -> None:
-        self.awarie += 1
-        self.probka_w_toku = False
-        if self.stan == "polotwarty" or self.awarie >= PROG_AWARII:
-            self.otwarty_do = time.monotonic() + CZAS_OTWARCIA_S
-            self._ustaw("otwarty")
-
-
-WYLACZNIK = Wylacznik()
+    def failure(self) -> None:
+        self.failures += 1
+        self.probe_in_flight = False
+        if self.state == "half_open" or self.failures >= FAILURE_THRESHOLD:
+            self.open_until = time.monotonic() + OPEN_DURATION_S
+            self._set_state("open")
 
 
-async def wywolaj(z: Zadanie) -> Wynik:
-    trace.get_current_span().set_attribute("llm.cb.stan", WYLACZNIK.stan)
+BREAKER = CircuitBreaker()
+
+
+async def invoke(z: LLMJob) -> LLMResult:
+    trace.get_current_span().set_attribute("llm.cb.state", BREAKER.state)
     if not config.LLM_FALLBACK:
-        return await klient.zapytaj(z, "a")
-    if WYLACZNIK.czy_pytac_a():
+        return await client.complete(z, "a")
+    if BREAKER.should_try_a():
         try:
-            w = await klient.zapytaj(z, "a")
-            WYLACZNIK.sukces()
+            w = await client.complete(z, "a")
+            BREAKER.success()
             return w
         except Exception as e:
-            if not _awaria(e):
-                WYLACZNIK.probka_w_toku = False
+            if not _is_outage(e):
+                BREAKER.probe_in_flight = False
                 raise
-            WYLACZNIK.awaria()
-    return await klient.zapytaj(z, "b")
+            BREAKER.failure()
+    return await client.complete(z, "b")

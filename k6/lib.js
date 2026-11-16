@@ -1,21 +1,21 @@
-// Wspólne elementy scenariuszy k6 kursu python-llm-perf.
-// - czasy z nagłówka Server-Timing aplikacji (czekanie / llm / ttft / total) jako osobne Trendy per klasa,
-// - liczniki statusów per klasa (200 / 499 / 502 / 503 / 504 / 0 = timeout lub zerwanie po stronie k6),
-// - handleSummary: zapis podsumowania do /wyniki/<NAZWA>.json (katalog ./wyniki w repo) + tekst na konsolę.
+// Shared parts of the k6 scenarios of the python-llm-perf course.
+// - times from the app's Server-Timing header (wait / llm / ttft / total) as separate Trends per class,
+// - status counters per class (200 / 499 / 502 / 503 / 504 / 0 = a timeout or a dropped connection on the k6 side),
+// - handleSummary: writes the summary to /results/<NAME>.json (the ./results directory in the repo) + text to the console.
 import { Counter, Trend } from 'k6/metrics';
 
 export const APP = __ENV.APP_URL || 'http://host.docker.internal:8060';
-export const KLASY = ['krotkie', 'dlugie'];
-const KODY = [200, 429, 499, 500, 502, 503, 504, 0];
+export const REQUEST_CLASSES = ['short', 'long'];
+const CODES = [200, 429, 499, 500, 502, 503, 504, 0];
 
-const trendy = {};
-const statusy = {};
-for (const k of KLASY) {
-  for (const t of ['czekanie', 'llm', 'ttft', 'total']) {
-    trendy[`${t}_${k}`] = new Trend(`app_${t}_${k}`, true);
+const trends = {};
+const status_counters = {};
+for (const k of REQUEST_CLASSES) {
+  for (const t of ['wait', 'llm', 'ttft', 'total']) {
+    trends[`${t}_${k}`] = new Trend(`app_${t}_${k}`, true);
   }
-  for (const c of KODY) {
-    statusy[`${k}_${c}`] = new Counter(`status_${k}_${c}`);
+  for (const c of CODES) {
+    status_counters[`${k}_${c}`] = new Counter(`status_${k}_${c}`);
   }
 }
 
@@ -29,18 +29,18 @@ export function serverTiming(res) {
   return out;
 }
 
-// Zapisuje czasy aplikacji i status żądania danej klasy.
-export function zapisz(res, klasa) {
-  const kod = KODY.includes(res.status) ? res.status : 500;
-  statusy[`${klasa}_${kod}`].add(1);
+// Records the app's times and the status of a request of the given class.
+export function record(res, requestClass) {
+  const code = CODES.includes(res.status) ? res.status : 500;
+  status_counters[`${requestClass}_${code}`].add(1);
   const st = serverTiming(res);
-  for (const t of ['czekanie', 'llm', 'ttft', 'total']) {
-    if (st[t] !== undefined) trendy[`${t}_${klasa}`].add(st[t]);
+  for (const t of ['wait', 'llm', 'ttft', 'total']) {
+    if (st[t] !== undefined) trends[`${t}_${requestClass}`].add(st[t]);
   }
   return st;
 }
 
-// Deterministyczny generator liczb pseudolosowych (mulberry32) — ten sam harmonogram w każdym przebiegu.
+// A deterministic pseudo-random number generator (mulberry32) — the same schedule in every run.
 export function rng(seed) {
   let a = seed >>> 0;
   return function () {
@@ -52,34 +52,34 @@ export function rng(seed) {
   };
 }
 
-export function podsumowanie(nazwa) {
+export function summarize(name) {
   return function (data) {
-    const plik = `/wyniki/${__ENV.WYNIK || nazwa}.json`;
-    data.meta = { nazwa: __ENV.WYNIK || nazwa, koniec: new Date().toISOString(), env: { APP_URL: APP } };
+    const file = `/results/${__ENV.RESULT || name}.json`;
+    data.meta = { name: __ENV.RESULT || name, end: new Date().toISOString(), env: { APP_URL: APP } };
     return {
-      [plik]: JSON.stringify(data, null, 1),
-      stdout: tekst(data),
+      [file]: JSON.stringify(data, null, 1),
+      stdout: report_text(data),
     };
   };
 }
 
-// Zwięzłe podsumowanie na konsolę (bez zależności z sieci): trendy w ms, liczniki, tempo, dropped_iterations.
-function tekst(data) {
+// A concise console summary (no network dependencies): trends in ms, counters, rate, dropped_iterations.
+function report_text(data) {
   const m = data.metrics;
-  const linie = [`\n== ${data.meta.nazwa} ==`];
-  const czas_s = (data.state && data.state.testRunDurationMs || 0) / 1000;
-  linie.push(`czas testu: ${czas_s.toFixed(1)} s`);
-  for (const [nazwa, v] of Object.entries(m).sort()) {
+  const lines = [`\n== ${data.meta.name} ==`];
+  const duration_s = (data.state && data.state.testRunDurationMs || 0) / 1000;
+  lines.push(`test duration: ${duration_s.toFixed(1)} s`);
+  for (const [name, v] of Object.entries(m).sort()) {
     const val = v.values || {};
     if (v.type === 'trend' && val.count !== 0 && val['p(50)'] !== undefined) {
-      linie.push(`${nazwa.padEnd(36)} p50=${f(val['p(50)'])} p90=${f(val['p(90)'])} p99=${f(val['p(99)'])} max=${f(val.max)}`);
+      lines.push(`${name.padEnd(36)} p50=${f(val['p(50)'])} p90=${f(val['p(90)'])} p99=${f(val['p(99)'])} max=${f(val.max)}`);
     } else if (v.type === 'counter' && val.count > 0) {
-      linie.push(`${nazwa.padEnd(36)} ${val.count} (${(val.rate || 0).toFixed(2)}/s)`);
+      lines.push(`${name.padEnd(36)} ${val.count} (${(val.rate || 0).toFixed(2)}/s)`);
     } else if (v.type === 'rate' && val.rate !== undefined) {
-      linie.push(`${nazwa.padEnd(36)} ${(val.rate * 100).toFixed(2)}%`);
+      lines.push(`${name.padEnd(36)} ${(val.rate * 100).toFixed(2)}%`);
     }
   }
-  return linie.join('\n') + '\n';
+  return lines.join('\n') + '\n';
 }
 
 function f(ms) {

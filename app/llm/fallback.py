@@ -1,30 +1,30 @@
-"""Zapasowy dostawca (fallback) a → b.
+"""Fallback provider a → b.
 
-Ćw. 11 (W12): przy awarii `a` KAŻDE żądanie najpierw płaci pełny koszt porażki u `a` (np. timeout),
-a dopiero potem idzie do `b`. Brak wyłącznika (circuit breaker): nie pamiętamy, że `a` leży.
-TODO ćw. 11: wyłącznik — stany zamknięty → otwarty (po N porażkach) → półotwarty (próbka po czasie).
+Ex. 11 (F12): when `a` fails, EVERY request first pays the full cost of the failure at `a` (e.g. a timeout)
+and only then goes to `b`. There is no circuit breaker: we do not remember that `a` is down.
+TODO ex. 11: a circuit breaker — states closed → open (after N failures) → half-open (a probe request after a while).
 """
 from __future__ import annotations
 
 import anthropic
 
 from .. import config
-from . import Wynik, Zadanie, klient
+from . import LLMJob, LLMResult, client
 
-# Błędy, po których warto spróbować innego dostawcy: awaria/zawieszenie, nie „za dużo ruchu".
-BLEDY_AWARII = (anthropic.APIConnectionError, anthropic.InternalServerError)
+# Errors after which it is worth trying another provider: an outage/hang, not "too much traffic".
+OUTAGE_ERRORS = (anthropic.APIConnectionError, anthropic.InternalServerError)
 
 
-def _awaria(e: Exception) -> bool:
+def _is_outage(e: Exception) -> bool:
     if isinstance(e, anthropic.OverloadedError):
-        return False   # 529 overloaded = przeciążenie, nie awaria — fallback przeniósłby burzę na `b`
-    return isinstance(e, BLEDY_AWARII)
+        return False   # 529 overloaded = overload, not an outage — a fallback would move the storm to `b`
+    return isinstance(e, OUTAGE_ERRORS)
 
 
-async def wywolaj(z: Zadanie) -> Wynik:
+async def invoke(z: LLMJob) -> LLMResult:
     try:
-        return await klient.zapytaj(z, "a")
+        return await client.complete(z, "a")
     except Exception as e:
-        if not (config.LLM_FALLBACK and _awaria(e)):
+        if not (config.LLM_FALLBACK and _is_outage(e)):
             raise
-    return await klient.zapytaj(z, "b")
+    return await client.complete(z, "b")

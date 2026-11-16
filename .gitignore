@@ -8,7 +8,7 @@ __pycache__/
 data/*.jsonl
 data/*.json
 !data/.gitkeep
-# przebiegi pomocnicze (nakładki solutions, logi procesów) i wyniki testów obciążeniowych
+# helper runs (solutions overlays, process logs) and load test results
 .run/
-wyniki/*
-!wyniki/.gitkeep
+results/*
+!results/.gitkeep

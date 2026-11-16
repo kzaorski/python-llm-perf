@@ -1,11 +1,11 @@
-# Ćw. 04 — podpowiedź 3 (pseudokod)
+# Ex. 04 — hint 3 (pseudocode)
 
 ```python
 @router.post("/claims/{n}/classify")
-async def klasyfikuj(n: int, request: Request):
-    z = Zadanie(klasa="krotkie", endpoint="classify", max_tokens=16, system=SYSTEM,
-                prompt=_prompt(n), naglowki=obsluga.naglowki_atrapy(request))
-    w = await obsluga.wykonaj(request, z)
-    return {"zgloszenie": dane.zgloszenie(n)["id"], "kategoria": _kategoria(w.tekst, n)}
+async def classify(n: int, request: Request):
+    z = LLMJob(request_class="short", endpoint="classify", max_tokens=16, system=SYSTEM,
+               prompt=_prompt(n), headers=pipeline.mock_headers(request))
+    w = await pipeline.execute(request, z)
+    return {"claim": data.claim(n)["id"], "category": _category(w.text, n)}
 ```
-Usuń `_klient_sync` i ręczne `zapisz_wynik` (robi to `obsluga.wykonaj`). `python check.py ex04`.
+Remove `_sync_client` and the manual `record_outcome` (`pipeline.execute` does that). `python check.py ex04`.

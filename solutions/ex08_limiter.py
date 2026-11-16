@@ -1,13 +1,13 @@
-"""[ROZWIĄZANIE ćw. 08 (zawiera 01, 06) — kopiuj do app/llm/limiter.py] Sloty LLM: ile wywołań naraz (semafor) i w jakim tempie (limiter dostawcy).
+"""[SOLUTION ex. 08 (includes 01, 06) — copy to app/llm/limiter.py] LLM slots: how many calls at once (a semaphore) and at what rate (the provider limiter).
 
-Ćw. 01 — ✅ czas czekania na slot w trace (span llm.queue_wait, atrybut llm.queue.wait_ms) i w metrykach.
-Ćw. 06 — ✅ rozmiar puli z prawa Little'a (W3: było 4).
-Ćw. 08 — ✅ limiter tempa z nagłówków anthropic-ratelimit-* i retry-after (W4).
-Ćw. 12 — osobne pule dla klas krótkich i długich (W18: teraz jedna wspólna pula).
+Ex. 01 — ✅ the slot wait time in the trace (llm.queue_wait span, llm.queue.wait_ms attribute) and in the metrics.
+Ex. 06 — ✅ pool size from Little's law (F3: it was 4).
+Ex. 08 — ✅ a rate limiter from the anthropic-ratelimit-* headers and retry-after (F4).
+Ex. 12 — separate pools for the short and long classes (F18: one shared pool for now).
 
-`slot()` jest używany przez app/obsluga.py:
-    async with limiter.slot(klasa, max_tokens, max_czekania):
-        ... wywołanie LLM ...
+`slot()` is used by app/pipeline.py:
+    async with limiter.slot(request_class, max_tokens, max_wait):
+        ... LLM call ...
 """
 from __future__ import annotations
 
@@ -18,132 +18,132 @@ from contextlib import asynccontextmanager
 
 from opentelemetry import trace
 
-from .. import stan, telemetry
-from ..bledy import Odrzucone
+from .. import state, telemetry
+from ..errors import Rejected
 
-# ćw. 06 (W3): rozmiar puli z prawa Little'a: L = λ · W.
-#   Ruch docelowy λ ≈ 20 żądań/s, czas wywołania W ≈ 1.3 s (p50 streszczenia u atrapy; p99 ~1.8 s)
-#   → średnio 26 wywołań w toku. Zapas na ogon i chwilowe skoki: 32. Więcej nie pomoże, gdy
-#   ograniczeniem jest dostawca (moc/limity) — wtedy kolejka przenosi się do niego (ćw. 08, 12).
-SLOTY = int(os.environ.get("LLM_SLOTY", "32"))
-# W18 (ćw. 12): jedna pula dla krótkich i wielominutowych wywołań.
-_SEMAFOR = asyncio.Semaphore(SLOTY)
+# ex. 06 (F3): pool size from Little's law: L = λ · W.
+#   Target traffic λ ≈ 20 requests/s, call time W ≈ 1.3 s (p50 of a summary on the mock; p99 ~1.8 s)
+#   → 26 calls in flight on average. Headroom for the tail and brief spikes: 32. More will not help when
+#   the provider is the constraint (capacity/limits) — then the queue moves to it (ex. 08, 12).
+SLOTS = int(os.environ.get("LLM_SLOTS", "32"))
+# F18 (ex. 12): one pool for short and multi-minute calls.
+_SEMAPHORE = asyncio.Semaphore(SLOTS)
 
 
-def semafor(klasa: str) -> asyncio.Semaphore:
-    return _SEMAFOR
+def semaphore(request_class: str) -> asyncio.Semaphore:
+    return _SEMAPHORE
 
 
 @asynccontextmanager
-async def slot(klasa: str, max_tokens: int, max_czekania: float | None = None):
-    """Zajmuje slot LLM dla klasy; `max_czekania` (s) — po tym czasie Odrzucone (ćw. 12)."""
-    st = stan.STAN[klasa]
-    sem = semafor(klasa)
-    tok = st.zacznij_czekac()
+async def slot(request_class: str, max_tokens: int, max_wait: float | None = None):
+    """Takes an LLM slot for the class; `max_wait` (s) — after that time Rejected (ex. 12)."""
+    st = state.STATE[request_class]
+    sem = semaphore(request_class)
+    tok = st.start_waiting()
     t0 = time.perf_counter()
     t0_ns = time.time_ns()
     try:
-        if max_czekania is None:
+        if max_wait is None:
             await sem.acquire()
         else:
             try:
-                await asyncio.wait_for(sem.acquire(), max_czekania)
+                await asyncio.wait_for(sem.acquire(), max_wait)
             except TimeoutError:
-                raise Odrzucone("czekanie_na_slot", retry_after=max_czekania) from None
+                raise Rejected("slot_wait_timeout", retry_after=max_wait) from None
         try:
-            await tempo(klasa, max_tokens)
+            await pace(request_class, max_tokens)
         except BaseException:
             sem.release()
             raise
     finally:
-        st.przestan_czekac(tok)
-    czekanie = time.perf_counter() - t0
-    # ćw. 01: czas czekania widoczny w trace i w metrykach.
-    # Span czekania tworzymy BEZ aktywowania (start_span, nie start_as_current_span): jest rodzeństwem
-    # spanu `llm.call`, a nie jego rodzicem — inaczej wywołanie wyglądałoby na część czekania.
+        st.stop_waiting(tok)
+    wait = time.perf_counter() - t0
+    # ex. 01: the wait time is visible in the trace and in the metrics.
+    # We create the wait span WITHOUT activating it (start_span, not start_as_current_span): it is a sibling
+    # of the `llm.call` span, not its parent — otherwise the call would look like part of the wait.
     s = telemetry.tracer.start_span("llm.queue_wait", start_time=t0_ns,
-                                    attributes={"app.klasa": klasa, "llm.waiting_przy_wejsciu": st.liczba_czekajacych})
+                                    attributes={"app.request_class": request_class, "llm.waiting_at_entry": st.waiting_count})
     s.end()
-    trace.get_current_span().set_attribute("llm.queue.wait_ms", round(czekanie * 1000, 1))
-    telemetry.zapisz(telemetry.H_CZEKANIE, czekanie, klasa=klasa)
-    st.w_toku += 1
+    trace.get_current_span().set_attribute("llm.queue.wait_ms", round(wait * 1000, 1))
+    telemetry.record(telemetry.H_QUEUE_WAIT, wait, request_class=request_class)
+    st.inflight += 1
     try:
-        yield czekanie
+        yield wait
     finally:
-        st.w_toku -= 1
+        st.inflight -= 1
         sem.release()
 
 
-class Kubelek:
-    """Token bucket „po naszej stronie", zsynchronizowany z nagłówkami dostawcy.
+class Bucket:
+    """A token bucket "on our side", synchronized with the provider's headers.
 
-    limit/min poznajemy z `anthropic-ratelimit-*-limit`, a poziom korygujemy w dół do `*-remaining`
-    (dostawca wie lepiej, ile zostało — np. gdy ruch idzie też z innych procesów).
+    We learn the limit/min from `anthropic-ratelimit-*-limit`, and correct the level down to `*-remaining`
+    (the provider knows better how much is left — e.g. when traffic also comes from other processes).
     """
 
     def __init__(self) -> None:
-        self.limit: float | None = None      # na minutę; None = jeszcze nie znamy
-        self.poziom = 0.0
+        self.limit: float | None = None      # per minute; None = not known yet
+        self.level = 0.0
         self.t = time.monotonic()
 
-    def _uzupelnij(self) -> None:
+    def _refill(self) -> None:
         now = time.monotonic()
         if self.limit:
-            self.poziom = min(self.limit, self.poziom + (now - self.t) * self.limit / 60.0)
+            self.level = min(self.limit, self.level + (now - self.t) * self.limit / 60.0)
         self.t = now
 
-    def czas_do(self, n: float) -> float:
+    def time_until(self, n: float) -> float:
         if not self.limit:
             return 0.0
-        self._uzupelnij()
+        self._refill()
         n = min(n, self.limit)
-        return 0.0 if self.poziom >= n else (n - self.poziom) * 60.0 / self.limit
+        return 0.0 if self.level >= n else (n - self.level) * 60.0 / self.limit
 
-    def zabierz(self, n: float) -> None:
+    def take(self, n: float) -> None:
         if self.limit:
-            self._uzupelnij()
-            self.poziom -= n
+            self._refill()
+            self.level -= n
 
-    def synchronizuj(self, limit: int, pozostalo: int) -> None:
-        self._uzupelnij()
+    def sync(self, limit: int, remaining: int) -> None:
+        self._refill()
         if self.limit != limit:
             self.limit = float(limit)
-            self.poziom = float(pozostalo)
+            self.level = float(remaining)
         else:
-            self.poziom = min(self.poziom, float(pozostalo))
+            self.level = min(self.level, float(remaining))
 
 
-_ZADANIA = Kubelek()        # żądania / min (RPM)
-_TOKENY_WYJ = Kubelek()     # tokeny wyjścia / min (OTPM) — dostawca rezerwuje max_tokens na starcie
-_pauza_do = 0.0             # po 429: wszyscy czekają do retry-after
-_kolejnosc = asyncio.Lock()  # FIFO: kto pierwszy czekał, ten pierwszy dostaje token
+_REQUESTS = Bucket()        # requests / min (RPM)
+_OUTPUT_TOKENS = Bucket()   # output tokens / min (OTPM) — the provider reserves max_tokens at the start
+_paused_until = 0.0         # after a 429: everyone waits until retry-after
+_order = asyncio.Lock()     # FIFO: whoever waited first gets the token first
 
 
-async def tempo(klasa: str, max_tokens: int) -> None:
-    """ćw. 08 (W4): czekaj, aż limity dostawcy pozwolą na wywołanie — zamiast zbierać 429.
+async def pace(request_class: str, max_tokens: int) -> None:
+    """ex. 08 (F4): wait until the provider limits allow the call — instead of collecting 429s.
 
-    Limity poznajemy z nagłówków pierwszych odpowiedzi (do tego czasu nie ograniczamy — pierwszą falę
-    i tak trzyma pula slotów). Nie czekamy na „sondę": odpowiedź bez strumienia niesie nagłówki dopiero
-    po całej generacji, więc czekanie na nią zatrzymałoby start każdego procesu (zmierzone: +2.1 s).
+    We learn the limits from the headers of the first responses (until then we do not limit — the first wave
+    is held by the slot pool anyway). We do not wait for a "probe": a non-streaming response carries the headers only
+    after the whole generation, so waiting for it would stall the start of every process (measured: +2.1 s).
     """
-    async with _kolejnosc:
+    async with _order:
         while True:
-            czekaj = max(_pauza_do - time.monotonic(), _ZADANIA.czas_do(1), _TOKENY_WYJ.czas_do(max_tokens))
-            if czekaj <= 0:
-                _ZADANIA.zabierz(1)
-                _TOKENY_WYJ.zabierz(max_tokens)
+            wait_s = max(_paused_until - time.monotonic(), _REQUESTS.time_until(1), _OUTPUT_TOKENS.time_until(max_tokens))
+            if wait_s <= 0:
+                _REQUESTS.take(1)
+                _OUTPUT_TOKENS.take(max_tokens)
                 return
-            await asyncio.sleep(min(czekaj, 1.0))
+            await asyncio.sleep(min(wait_s, 1.0))
 
 
-def aktualizuj_z_naglowkow(status: int, naglowki) -> None:
-    """ćw. 08: limity i pozostałe zasoby z nagłówków; 429 → wstrzymanie wszystkich do retry-after."""
-    global _pauza_do
-    for kubelek, nazwa in ((_ZADANIA, "requests"), (_TOKENY_WYJ, "output-tokens")):
-        lim = naglowki.get(f"anthropic-ratelimit-{nazwa}-limit")
-        poz = naglowki.get(f"anthropic-ratelimit-{nazwa}-remaining")
-        if lim and poz:
-            kubelek.synchronizuj(int(lim), int(poz))
+def update_from_headers(status: int, headers) -> None:
+    """ex. 08: limits and remaining resources from the headers; a 429 → pause everyone until retry-after."""
+    global _paused_until
+    for bucket, name in ((_REQUESTS, "requests"), (_OUTPUT_TOKENS, "output-tokens")):
+        lim = headers.get(f"anthropic-ratelimit-{name}-limit")
+        remaining_hdr = headers.get(f"anthropic-ratelimit-{name}-remaining")
+        if lim and remaining_hdr:
+            bucket.sync(int(lim), int(remaining_hdr))
     if status == 429:
-        ra = naglowki.get("retry-after")
-        _pauza_do = max(_pauza_do, time.monotonic() + (float(ra) if ra else 1.0))
+        retry_after = headers.get("retry-after")
+        _paused_until = max(_paused_until, time.monotonic() + (float(retry_after) if retry_after else 1.0))

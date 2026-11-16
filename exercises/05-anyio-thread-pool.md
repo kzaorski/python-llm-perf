@@ -1,70 +1,73 @@
-# Ćwiczenie 5: Pula wątków anyio (40) — czekanie, które nie zużywa CPU
+# Exercise 5: The anyio thread pool (40) — waiting that burns no CPU
 
-> Czas: ~30 min
+> Time: ~30 min
 
-> Blok II. Czytanka `04a-asyncio-petla-i-pule.md` (sekcja o puli wątków).
+> Block II. Reading `04a-asyncio-loop-and-pools.md` (the section on the thread pool).
 
-## Cel
-Endpoint pism do klientów (`POST /claims/{n}/letter`) jest zwykłym `def` z synchronicznym klientem LLM.
-FastAPI uruchamia takie handlery w puli wątków anyio, która ma limit **40**. Wysyłasz 60 pism naraz
-i znajdujesz drugą „falę” — 20 żądań czeka na wolny wątek, choć procesor się nudzi, a dostawca ma
-wolną moc. Naprawiasz handler tak, by nie zajmował wątku na czas czekania na LLM.
+## Goal
+The customer letter endpoint (`POST /claims/{n}/letter`) is a plain `def` with a synchronous LLM client.
+FastAPI runs such handlers in the anyio thread pool, which has a limit of **40**. You send 60 letters at
+once and find the second "wave" — 20 requests wait for a free thread although the CPU is idle and the
+provider has spare capacity. You fix the handler so that it does not occupy a thread while waiting for the
+LLM.
 
-## Teoria w pigułce
-- **Pula wątków anyio** — `def`-handlery FastAPI i `run_in_threadpool` wykonują się w wątkach roboczych
-  z jednym globalnym limiterem: 40 naraz. Intuicja: 40 okienek; 41. klient czeka, aż ktoś odejdzie. Po co:
-  chroni proces przed tysiącami wątków. Pułapka: wątek trzymany przez czekanie na sieć (LLM 2 s) to
-  zmarnowane okienko — przepustowość = 40 / czas wywołania.
-- **Czekanie bez CPU** — zasób (wątek) zajęty, procesor wolny. Profil CPU nic nie pokaże; to kolejka,
-  nie obliczenia. Pułapka: „mamy wolny CPU, więc to nie aplikacja” — błędny wniosek.
-- **Schodki w czasach odpowiedzi** — przy N > 40 czasy układają się w fale co ~czas wywołania:
-  40 × t, potem 20 × 2t. Takie wielomodalne rozkłady są podpisem stałej puli. (→ `00-teoria.md`
-  „Percentyle i ogon”)
-- **`async def` + klient async** — na czas czekania na LLM korutyna oddaje pętlę i nie trzyma żadnego
-  wątku. Limit współbieżności ustalasz wtedy świadomie (semafor slotów), a nie przypadkiem (40).
+## Theory in a nutshell
+- **The anyio thread pool** — FastAPI `def` handlers and `run_in_threadpool` run in worker threads with a
+  single global limiter: 40 at a time. Intuition: 40 service windows; the 41st customer waits until someone
+  leaves. Why: it protects the process from thousands of threads. Pitfall: a thread held while waiting for
+  the network (a 2 s LLM call) is a wasted window — throughput = 40 / call time.
+- **Waiting without CPU** — a resource (a thread) is busy, the processor is free. The CPU profile shows
+  nothing; this is a queue, not computation. Pitfall: "the CPU is idle, so it is not the application" — a
+  wrong conclusion.
+- **Steps in response times** — for N > 40 the times line up in waves about one call time apart:
+  40 × t, then 20 × 2t. Such multimodal distributions are the signature of a fixed pool. (→ `00-theory.md`
+  "Percentiles and the tail")
+- **`async def` + an async client** — while waiting for the LLM the coroutine hands the loop back and holds
+  no thread. You then set the concurrency limit deliberately (the slot semaphore), not by accident (40).
 
-## Kroki
-1. Stan po ćw. 4, aplikacja na 8060.
-2. **Hipoteza:** 60 pism naraz, każde ~2.1 s u atrapy (nagłówek `x-mock-ttft-ms: 2000` ustala czas
-   do pierwszego tokenu). Jaki będzie rozkład czasów? Ile żądań skończy się po ~2 s, ile później i kiedy?
-3. Fala 60 równoległych żądań (posortowane czasy, w sekundach):
+## Steps
+1. State after ex. 4, application on 8060.
+2. **Hypothesis:** 60 letters at once, each ~2.1 s at the mock (the `x-mock-ttft-ms: 2000` header sets the
+   time to first token). What will the distribution of times look like? How many requests will finish after
+   ~2 s, how many later, and when?
+3. A wave of 60 parallel requests (sorted times, in seconds):
    ```bash
    seq 60 | xargs -P 60 -I{} curl -s -o /dev/null -w '%{time_total}\n' -X POST \
      -H 'x-mock-ttft-ms: 2000' -H 'x-mock-total-s: 0.1' 127.0.0.1:8060/claims/{}/letter | sort -n | awk '{printf "%.2f ", $1} END {print ""}'
    ```
-   U mnie: 40 wartości 2.12–2.21 s, potem 20 wartości 4.19–4.33 s. Pierwsza fala zaraz po starcie
-   procesu bywa wolniejsza (rozgrzewka klienta) — powtórz polecenie 2–3 razy.
-4. Zobacz, czego NIE widać: `curl -s 127.0.0.1:8060/diag | python -m json.tool` — kolejka LLM pusta
-   (pismo nie przechodzi przez semafor), lag pętli w normie (pętla nie stoi — stoją wątki). A CPU?
-   Uruchom falę z kroku 3 jeszcze raz i w drugim terminalu, w jej trakcie:
+   In my run: 40 values of 2.12–2.21 s, then 20 values of 4.19–4.33 s. The first wave right after the
+   process starts can be slower (client warm-up) — repeat the command 2–3 times.
+4. See what you do NOT see: `curl -s 127.0.0.1:8060/diag | python -m json.tool` — the LLM queue is empty
+   (the letter does not go through the semaphore), the event loop lag is normal (the loop is not stuck — the
+   threads are). And the CPU? Run the wave from step 3 once more and, in a second terminal, during it:
    ```bash
    ps -o %cpu= -p $(lsof -tiTCP:8060 -sTCP:LISTEN)
    ```
-   U mnie: `%cpu` procesu **0.4** w trakcie czekania (16 w chwili, gdy fala wraca i 60 odpowiedzi jest
-   wysyłanych naraz); `/diag`: kolejka LLM pusta, `petla_lag_max_10s_ms` 2.6. Fale po rozgrzewce: 2.14–2.18 s
-   i ~4.3 s (pierwsza zaraz po starcie: 2.85 / 5.01 s).
-5. Otwórz **`app/szablony.py`** (`TODO ćw. 05`). Zamień handler na `async def` i wywołanie na
-   asynchronicznego klienta aplikacji: `await klient.zapytaj(Zadanie(...))` z `app/llm/klient.py`.
-   Renderowanie szablonu jest szybkie (mikrosekundy CPU) — może zostać w pętli.
-6. Restart i powtórka kroku 3. U mnie: jedna fala, 60 × 2.14–2.28 s (p99 2.28 s; przed: 2.2 / 4.35 s).
+   In my run: the process's `%cpu` was **0.4** while waiting (16 at the moment the wave returns and 60
+   responses are sent at once); `/diag`: LLM queue empty, `loop_lag_max_10s_ms` 2.6. Waves after warm-up:
+   2.14–2.18 s and ~4.3 s (the first one right after startup: 2.85 / 5.01 s).
+5. Open **`app/templates.py`** (`TODO ex. 05`). Change the handler to `async def` and the call to the
+   application's async client: `await client.complete(LLMJob(...))` from `app/llm/client.py`.
+   Rendering the template is fast (microseconds of CPU) — it can stay in the loop.
+6. Restart and repeat step 3. In my run: one wave, 60 × 2.14–2.28 s (p99 2.28 s; before: 2.2 / 4.35 s).
 7. `python check.py ex05`
 
-## Kryteria „done”
-- [ ] 60 równoległych pism kończy się jedną falą (max < 1.5 × min).
-- [ ] Umiesz rozpoznać „schodki co ~40” w rozkładzie i wskazać ich przyczynę bez profilu.
-- [ ] `python check.py ex05` przechodzi.
+## Definition of done
+- [ ] 60 parallel letters finish in a single wave (max < 1.5 × min).
+- [ ] You can recognize "steps every ~40" in a distribution and point to the cause without a profile.
+- [ ] `python check.py ex05` passes.
 
-## Pytania kontrolne
-1. Dlaczego objaw zaczyna się dokładnie od 41. żądania? Gdzie jest ta liczba?
-2. Podniesienie limitu anyio do 400 też „naprawi” test. Jaki problem przenosisz w ten sposób dalej?
-3. Czym różni się ten objaw od ćw. 4 (blokada pętli)? Jak rozróżnisz je po `/diag/ping`?
+## Review questions
+1. Why does the symptom start at exactly the 41st request? Where is that number?
+2. Raising the anyio limit to 400 also "fixes" the test. What problem are you pushing downstream that way?
+3. How does this symptom differ from ex. 4 (loop blocking)? How would you tell them apart using `/diag/ping`?
 
-Odpowiedzi: `solutions/pytania_odpowiedzi.md`.
+Answers: `solutions/questions_answers.md`.
 
-## ★ Bonus (opcjonalnie)
-Wyślij 60 pism i równolegle 20 klasyfikacji (już async po ćw. 4). Czy klasyfikacje czekają na pisma?
-Dlaczego nie? A co by było, gdyby i pisma, i klasyfikacje były `def`?
+## ★ Bonus (optional)
+Send 60 letters and, in parallel, 20 classifications (already async after ex. 4). Do the classifications
+wait for the letters? Why not? And what would happen if both the letters and the classifications were `def`?
 
 ---
-Utknąłeś? `solutions/hints/ex05_hint1.md` → `hint2` → `hint3`. Gotowe rozwiązanie:
-`solutions/ex05_szablony.py` → `app/szablony.py`.
+Stuck? `solutions/hints/ex05_hint1.md` → `hint2` → `hint3`. Ready-made solution:
+`solutions/ex05_templates.py` → `app/templates.py`.

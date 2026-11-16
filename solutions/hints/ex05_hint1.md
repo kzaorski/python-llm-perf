@@ -1,5 +1,5 @@
-# Ćw. 05 — podpowiedź 1 (kierunek)
+# Ex. 05 — hint 1 (direction)
 
-Handler `def` (bez `async`) FastAPI uruchamia w puli wątków anyio. Pula ma 40 miejsc. 41. żądanie czeka
-na wolny wątek — a wątki nie liczą, tylko czekają na LLM. Objaw: druga „fala” odpowiedzi, CPU prawie zero.
-Czy ten handler musi być synchroniczny?
+FastAPI runs a `def` handler (without `async`) in the anyio thread pool. The pool has 40 slots. The 41st
+request waits for a free thread — and the threads are not computing, they are waiting for the LLM. Symptom:
+a second "wave" of responses, CPU close to zero. Does this handler have to be synchronous?

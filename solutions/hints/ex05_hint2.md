@@ -1,7 +1,7 @@
-# Ćw. 05 — podpowiedź 2 (API)
+# Ex. 05 — hint 2 (API)
 
-- Pomiar fali: 60 równoległych `POST /claims/{n}/letter` z `x-mock-ttft-ms: 2000` — czasy układają się w
-  dwa schodki (~2.2 s i ~4.4 s).
-- Naprawa: `async def` + `await klient.zapytaj(Zadanie(...))` z `app/llm/klient.py` (AsyncAnthropic).
-  Renderowanie szablonu trwa mikrosekundy — może zostać w pętli. (Alternatywa „podnieś limiter anyio”
-  przesuwa próg, nie usuwa mechanizmu.)
+- Measuring the wave: 60 parallel `POST /claims/{n}/letter` with `x-mock-ttft-ms: 2000` — the times fall into
+  two steps (~2.2 s and ~4.4 s).
+- Fix: `async def` + `await client.complete(LLMJob(...))` from `app/llm/client.py` (AsyncAnthropic).
+  Rendering the template takes microseconds — it can stay in the loop. (The alternative, "raise the anyio
+  limiter", moves the threshold; it does not remove the mechanism.)

@@ -1,10 +1,10 @@
-# Ćw. 07 — podpowiedź 3 (pseudokod)
+# Ex. 07 — hint 3 (pseudocode)
 
 ```python
 bind = "127.0.0.1:8062"
 wsgi_app = "app.main:app"
 worker_class = "uvicorn_worker.UvicornWorker"
 workers = 2
-raw_env = ["APP_WARIANT=gunicorn-uvicorn", "LLM_SLOTY=32"]   # per proces
+raw_env = ["APP_VARIANT=gunicorn-uvicorn", "LLM_SLOTS=32"]   # per process
 ```
-Porównaj z `solutions/ex07_gunicorn.py` (nazwy zmiennych i reszta pliku). `python check.py ex07`.
+Compare with `solutions/ex07_gunicorn.py` (variable names and the rest of the file). `python check.py ex07`.

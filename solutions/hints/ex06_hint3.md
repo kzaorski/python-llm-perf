@@ -1,5 +1,5 @@
-# Ćw. 06 — podpowiedź 3 (zmiana)
+# Ex. 06 — hint 3 (change)
 
-W `app/llm/limiter.py`: `SLOTY = int(os.environ.get("LLM_SLOTY", "32"))` (20/s × ~1.05 s ≈ 21, zapas na ogon).
-Pula połączeń klienta (`LLM_POLACZENIA`, `app/llm/klient.py`) nie może być mniejsza niż semafor. Restart,
-`python check.py ex06`.
+In `app/llm/limiter.py`: `SLOTS = int(os.environ.get("LLM_SLOTS", "32"))` (20/s × ~1.05 s ≈ 21, headroom
+for the tail). The client's connection pool (`LLM_CONNECTIONS`, `app/llm/client.py`) must not be smaller than
+the semaphore. Restart, `python check.py ex06`.

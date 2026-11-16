@@ -1,25 +1,25 @@
-# Kurs python-llm-perf — zależności aplikacji, workera i skryptów (uruchamiane lokalnie).
-# Zakresy: >=wersja zweryfikowana 2026-10-31, <następny major. Python 3.11–3.14 (.python-version: 3.13).
+# python-llm-perf course — dependencies of the app, the worker and the scripts (run locally).
+# Ranges: >=version verified 2026-10-31, <next major. Python 3.11–3.14 (.python-version: 3.13).
 
-# serwer HTTP
+# HTTP server
 fastapi>=0.162.0,<1
 starlette>=1.10.0,<2
 uvicorn[standard]>=0.54.0,<1
 gunicorn>=26.2.0,<27
 uvicorn-worker>=0.4.0,<1
 
-# klienci HTTP i LLM (anthropic 2.x stoi na httpx2, nie na httpx)
+# HTTP and LLM clients (anthropic 2.x is built on httpx2, not httpx)
 anthropic>=2.3.0,<3
 httpx2>=2.16.0,<3
 httpx>=0.28.1,<1
 anyio>=4.15.1,<5
 
-# kolejka zadań: taskiq (asyncio) + Redis Streams
+# task queue: taskiq (asyncio) + Redis Streams
 taskiq[opentelemetry]>=0.13.0,<1
 taskiq-redis>=1.2.4,<2
 redis>=8.1.0,<9
 
-# obserwowalność: OpenTelemetry (OTLP/HTTP → grafana/otel-lgtm), Prometheus, Pyroscope
+# observability: OpenTelemetry (OTLP/HTTP → grafana/otel-lgtm), Prometheus, Pyroscope
 opentelemetry-api>=1.45.2,<2
 opentelemetry-sdk>=1.45.2,<2
 opentelemetry-exporter-otlp-proto-http>=1.45.2,<2

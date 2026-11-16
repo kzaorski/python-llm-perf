@@ -1,5 +1,5 @@
-# Ćw. 04 — podpowiedź 1 (kierunek)
+# Ex. 04 — hint 1 (direction)
 
-Handler `async def` wywołuje **synchronicznego** klienta SDK. Na czas tego wywołania pętla zdarzeń stoi —
-proces nie obsługuje nic innego (nawet `/diag/ping`). Szukaj ścieżki asynchronicznej, której używają już
-inne endpointy (streszczenia), i podłącz do niej klasyfikację.
+The `async def` handler calls the **synchronous** SDK client. For the duration of that call the event loop
+stands still — the process serves nothing else (not even `/diag/ping`). Look for the async path that the
+other endpoints (summaries) already use, and plug classification into it.

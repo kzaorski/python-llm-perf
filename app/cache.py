@@ -1,9 +1,9 @@
-"""Odpowiedzi na częste pytania klientów (FAQ) z cache w Redisie — endpoint GET /faq?q=…
+"""Answers to frequently asked customer questions (FAQ) with a Redis cache — endpoint GET /faq?q=…
 
-Ćw. 15 (W10): cache bez single-flight. Gdy klucz wygaśnie (albo jeszcze go nie ma), każde z N
-równoczesnych identycznych pytań widzi „miss" i SAMO woła LLM — N wywołań zamiast jednego
-(cache stampede). Przy popularnym pytaniu to fala ruchu do dostawcy co TTL sekund.
-TODO ćw. 15: single-flight — tylko jedno wywołanie na klucz; pozostali czekają na jego wynik.
+Ex. 15 (F10): a cache without single-flight. When a key expires (or does not exist yet), each of N
+concurrent identical questions sees a "miss" and calls the LLM ITSELF — N calls instead of one
+(cache stampede). With a popular question that is a wave of traffic to the provider every TTL seconds.
+TODO ex. 15: single-flight — only one call per key; the others wait for its result.
 """
 from __future__ import annotations
 
@@ -13,38 +13,38 @@ import os
 import redis.asyncio as aioredis
 from fastapi import APIRouter, Request
 
-from . import config, obsluga, telemetry
-from .llm import Zadanie
+from . import config, pipeline, telemetry
+from .llm import LLMJob
 
 router = APIRouter()
 r = aioredis.from_url(config.REDIS_URL, decode_responses=True)
 TTL_S = int(os.environ.get("FAQ_TTL_S", "60"))
 
 
-def klucz(q: str) -> str:
+def cache_key(q: str) -> str:
     return "faq:" + hashlib.sha1(q.strip().lower().encode()).hexdigest()[:16]
 
 
-async def policz(q: str, request: Request) -> str:
-    z = Zadanie(klasa="krotkie", endpoint="faq", max_tokens=300,
-                prompt=f"Odpowiedz klientowi ubezpieczyciela na pytanie: {q}",
-                naglowki=obsluga.naglowki_atrapy(request))
-    return (await obsluga.wykonaj(request, z)).tekst
+async def compute(q: str, request: Request) -> str:
+    z = LLMJob(request_class="short", endpoint="faq", max_tokens=300,
+               prompt=f"Answer the insurance customer's question: {q}",
+               headers=pipeline.mock_headers(request))
+    return (await pipeline.execute(request, z)).text
 
 
-async def pobierz_albo_policz(k: str, q: str, request: Request) -> tuple[str, str]:
-    """Zwraca (odpowiedź, skąd) — skąd: hit | miss."""
+async def get_or_compute(k: str, q: str, request: Request) -> tuple[str, str]:
+    """Returns (answer, source) — source: hit | miss."""
     v = await r.get(k)
     if v is not None:
-        telemetry.zapisz(telemetry.C_CACHE, 1, wynik="hit")
+        telemetry.record(telemetry.C_CACHE, 1, outcome="hit")
         return v, "hit"
-    telemetry.zapisz(telemetry.C_CACHE, 1, wynik="miss")
-    v = await policz(q, request)          # W10: każdy „miss" woła LLM osobno
+    telemetry.record(telemetry.C_CACHE, 1, outcome="miss")
+    v = await compute(q, request)          # F10: every "miss" calls the LLM separately
     await r.set(k, v, ex=TTL_S)
     return v, "miss"
 
 
 @router.get("/faq")
 async def faq(q: str, request: Request):
-    v, skad = await pobierz_albo_policz(klucz(q), q, request)
-    return {"pytanie": q, "odpowiedz": v, "cache": skad}
+    v, source = await get_or_compute(cache_key(q), q, request)
+    return {"question": q, "answer": v, "cache": source}
