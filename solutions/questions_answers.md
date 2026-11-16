@@ -1,7 +1,7 @@
-# Odpowiedzi do pytań kontrolnych (ćw. 01–18) i mini-incydentów I–IV
+# Answers to the review questions (ex. 01–18) and mini-incidents I–IV
 
-Liczby w odpowiedziach pochodzą z pomiarów autora (te same polecenia co w ćwiczeniach). U Ciebie będą
-inne w szczegółach — ważny jest kierunek i rząd wielkości.
+The numbers in the answers come from the author's measurements (the same commands as in the exercises). Yours
+will differ in the details — what matters is the direction and the order of magnitude.
 
 ## Ex. 01 — the first trace
 1. `start_span` without activation does not set the span as the current context, so the next span

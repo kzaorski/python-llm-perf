@@ -1,377 +1,337 @@
-# Słownik pojęć — kurs python-llm-perf
+# Glossary — python-llm-perf course
 
-Alfabetyczny słowniczek terminów użytych w `exercises/00-teoria.md`, czytankach
-blokowych (`01a`, `04a`, `08a`, `12a`, `14a`) i ćwiczeniach. Każde hasło: krótka
-definicja + odnośnik do miejsca, w którym pojęcie wyjaśniono szerzej (`→ 00`,
-`→ 01a`…) i do ćwiczeń, w których z niego korzystasz (`→ ćw. N`). Pełne
-wyjaśnienia (definicja → intuicja → po co → częsta pomyłka) są w dokumentach
-teoretycznych — tu tylko szybka ściąga.
+An alphabetical glossary of the terms used in `exercises/00-theory.md`, the block readings (`01a`, `04a`,
+`08a`, `12a`, `14a`) and the exercises. Each entry has a short definition, a pointer to where the concept is
+explained in depth (`→ 00`, `→ 01a`…) and to the exercises where you use it (`→ ex. N`). The full
+explanations (definition → intuition → why it matters → common mistake) are in the theory documents — this is
+only a quick cheat sheet.
 
-Mapa ćwiczeń: ćw. 1–3 = pomiar i teoria kolejek (trace, model otwarty/zamknięty,
-Little i kolano), ćw. 4–7 = asyncio, pule, procesy, ćw. 8–11 = dostawca (limity,
-ponowienia, timeouty, fallback), ćw. 12–13 = backpressure i streaming,
-ćw. 14–17 = kolejka zadań, cache, batching, porównanie z prawdziwym Claude,
-ćw. 18 = finał.
+Exercise map: ex. 1–3 = measurement and queueing theory (trace, open/closed model, Little's law and the
+knee), ex. 4–7 = asyncio, pools, processes, ex. 8–11 = the provider (limits, retries, timeouts, fallback),
+ex. 12–13 = backpressure and streaming, ex. 14–17 = task queue, cache, batching, comparison with the real
+Claude, ex. 18 = the final.
 
 ---
 
-**429 (Too Many Requests)** — odpowiedź dostawcy po przekroczeniu limitu RPM /
-ITPM / OTPM; w SDK `anthropic.RateLimitError`, z nagłówkiem `retry-after`.
-→ 00, 08a, ćw. 8.
+**429 (Too Many Requests)** — the provider's response after you exceed an RPM / ITPM / OTPM limit; in the SDK
+`anthropic.RateLimitError`, with a `retry-after` header.
+→ 00, 08a, ex. 8.
 
-**503 + Retry-After** — szybka odmowa *od aplikacji* przy pełnej kolejce albo po
-przekroczeniu budżetu czekania; `Retry-After` mówi klientowi, kiedy wrócić.
-Zdrowe zachowanie pod przeciążeniem, raportowane osobno od błędów. → 12a, ćw. 12.
+**503 + Retry-After** — a fast refusal *from the application* when the queue is full or the wait budget is
+exceeded; `Retry-After` tells the client when to come back. Healthy behavior under overload, reported
+separately from errors. → 12a, ex. 12.
 
-**529 (overloaded)** — dostawca nie ma wolnej mocy (niezależnie od Twojego
-limitu); w SDK 2.x `anthropic.OverloadedError`, która **nie** jest podklasą
-`InternalServerError`. Przeciążenie, nie awaria — fallback go nie powinien
-ponawiać. → 00, 08a, ćw. 9, 11, 14.
+**529 (overloaded)** — the provider has no spare capacity (regardless of your limit); in SDK 2.x
+`anthropic.OverloadedError`, which is **not** a subclass of `InternalServerError`. Overload, not an outage —
+a fallback should not retry it. → 00, 08a, ex. 9, 11, 14.
 
-**Amplifikacja ponowień** — stosunek prób HTTP do dostawcy do żądań
-użytkowników; warstwy się mnożą (3 próby aplikacji × 3 próby SDK = do 9).
-Zmierzone: 3.65 bez kontroli, 1.20 z budżetem 20%. → 08a, ćw. 9.
+**Age of the oldest** — how long the oldest request / task has been waiting
+(`llm_oldest_waiting_age_seconds`, `queue_oldest_age_seconds`, `mock_llm_oldest_inflight_seconds`); the best
+signal for a queue SLO. → 00, 14a, ex. 12, 14.
 
-**Anulowanie** — przerwanie zadania asyncio (`task.cancel()` →
-`CancelledError` w miejscu czekania); jedyny sposób, by czekające wywołanie
-oddało slot semafora, połączenie i generację u dostawcy. → 04a, 12a, ćw. 10, 18.
+**anyio thread limiter** — the default limit of 40 concurrent threads for `def` handlers and
+`run_in_threadpool` in FastAPI; above the limit, calls wait in waves of 40, with no CPU use and no span.
+→ 04a, ex. 5.
 
-**anyio — limiter wątków** — domyślny limit 40 równoczesnych wątków dla
-handlerów `def` i `run_in_threadpool` w FastAPI; ponad limit wywołania czekają
-falami co 40, bez CPU i bez spanu. → 04a, ćw. 5.
+**Arrival rate (λ)** — the intensity at which requests arrive; in an overloaded system it is higher than
+throughput, and the difference goes into the queue. The traffic phase is called the *inflow*. → 00, ex. 2, 3.
 
-**`asyncio.timeout`** — menedżer kontekstu z limitem całkowitym dla bloku
-kodu; po przekroczeniu anuluje zadanie i rzuca `TimeoutError`. W kursie służy
-jako deadline wywołania LLM. → 08a, ćw. 10.
+**`asyncio.timeout`** — a context manager with a total limit for a block of code; when exceeded it cancels the
+task and raises `TimeoutError`. In the course it serves as the deadline of an LLM call. → 08a, ex. 10.
 
-**Atrapa LLM** — własny serwer zgodny z Messages API (port 8061) z
-powtarzalnymi profilami: opóźnienia, limity, 429/529, streaming, ping,
-wywołania minutowe; dwa „dostawcy” `a` i `b`. → 00, ćw. 1, 8–14, 17.
+**Backlog** — the number of requests waiting and in progress at the moment the inflow ends; reported together
+with the age of the oldest and the drain time. → 00, ex. 12, 18.
 
-**Backlog gniazda** — kolejka połączeń w jądrze czekających na `accept()`;
-przy przepełnieniu klient dostaje zerwane połączenie. Pod `gunicorn -k sync`
-to w nim czeka nadmiar ruchu. → 04a, ćw. 7.
+**Backoff, exponential** — a pause before a retry that grows with the attempt number (base · 2ⁿ, with an
+upper cap); without jitter, clients come back together. → 08a, ex. 9.
 
-**Backoff wykładniczy** — przerwa przed ponowieniem rosnąca z numerem próby
-(baza · 2ⁿ, z górnym limitem); bez jittera klienci wracają razem. → 08a, ćw. 9.
+**Backpressure** — a signal from an overloaded service center to the sender to slow down; in HTTP, in
+practice: a bounded queue and load shedding. → 12a, ex. 12.
 
-**Backpressure** — sygnał przeciążonej stacji do nadawcy, że ma zwolnić; w
-HTTP praktycznie: kolejka ograniczona i odrzucanie nadmiaru. → 12a, ćw. 12.
+**BaseHTTPMiddleware** — the class behind `@app.middleware("http")` in Starlette/FastAPI; it breaks
+`request.is_disconnected()` in handlers, so cancellation on disconnect stops working. The course middleware is
+pure ASGI. → 12a, ex. 10.
 
-**BaseHTTPMiddleware** — klasa za `@app.middleware("http")` w Starlette/FastAPI;
-psuje `request.is_disconnected()` w handlerach, przez co anulowanie po
-rozłączeniu przestaje działać. Middleware kursu jest czystym ASGI. → 12a, ćw. 10.
+**Batching** — gluing many requests into one LLM call; parameters: window and maximum size, batch ≈
+min(λ · window, max), latency + ≤ window. It reduces the number of requests, not tokens. → 14a, ex. 16.
 
-**Batching (wsad)** — sklejanie wielu próśb w jedno wywołanie LLM; parametry:
-okno i maksymalny rozmiar, wsad ≈ min(λ · okno, max), latencja + ≤ okno.
-Zmniejsza liczbę żądań, nie tokenów. → 14a, ćw. 16.
+**Bottleneck** — the service center with the smallest capacity on the path; only widening it increases
+throughput. → 01a, ex. 6, 8.
 
-**Budżet czekania** — najdłuższy czas, jaki żądanie danej klasy może czekać na
-slot (w kursie 5 s / 20 s); po nim dostaje 503 zamiast czekać dalej. → 12a, ćw. 12.
+**Bounded queue** — a queue with a maximum length K; the excess is refused immediately. K ≈ acceptable wait ×
+capacity. → 12a, ex. 12.
 
-**Budżet ponowień** — globalny limit ponowień jako ułamek żądań w oknie
-(w kursie 20% / 10 s); ogranicza amplifikację do ×1.2 przy masowej awarii.
-→ 08a, ćw. 9.
+**Bulkhead (separate pools)** — splitting slots between request classes (in the course 32 short / 16 long) so
+that one class cannot take the other's resources; the cure for head-of-line blocking. → 01a, ex. 12.
 
-**Budżet timeoutów** — ułożenie zegarów od środka: timeouty SDK (bezczynność)
-< deadline aplikacji (per klasa) < timeouty warstw zewnętrznych (proxy, k6).
-→ 08a, ćw. 10.
+**Cache stampede** — after a key expires, N concurrent misses call the LLM N times; the cure: single-flight.
+Measured: 50 questions → 50 calls. → 14a, ex. 15, 18.
 
-**Bulkhead (osobne pule)** — rozdzielenie slotów między klasy żądań (w kursie
-32 krótkie / 16 długie), żeby jedna klasa nie zajęła zasobów drugiej; lekarstwo
-na head-of-line blocking. → 01a, ćw. 12.
+**Cancellation** — interrupting an asyncio task (`task.cancel()` → `CancelledError` at the point of waiting);
+the only way to make a waiting call give back its semaphore slot, its connection and its generation at the
+provider. → 04a, 12a, ex. 10, 18.
 
-**Cache odpowiedzi** — wynik LLM przechowywany pod kluczem przez TTL (w
-kursie FAQ w Redisie); trafienie nie woła dostawcy: λ_dostawca = (1 − h) · λ.
-→ 14a, ćw. 15.
+**`CancelledError`** — the exception a cancelled task receives at its `await`; it inherits from
+`BaseException`, so `except Exception` does not catch it (and should not). → 04a, ex. 10.
 
-**Cache stampede (lawina)** — po wygaśnięciu klucza N równoczesnych chybień
-woła LLM N razy; lekarstwo: single-flight. Zmierzone: 50 pytań → 50 wywołań.
-→ 14a, ćw. 15, 18.
+**Capacity (X_max)** — the largest sustainable throughput of a service center: c / S; the capacity of a path
+= the minimum over its service centers. → 00, 01a, ex. 3.
 
-**`CancelledError`** — wyjątek, który anulowane zadanie dostaje w miejscu
-`await`; dziedziczy po `BaseException`, więc `except Exception` go nie łapie
-(i nie powinien). → 04a, ćw. 10.
+**Capacity planning** — c = ⌈λ_peak · S / ρ_target⌉ with ρ_target 0.7–0.8, plus a check of the ceilings
+(provider limits and capacity) that you cannot raise with slots. → 01a, ex. 3, 6.
 
-**Circuit breaker (wyłącznik)** — automat stanów przed zawodnym dostawcą:
-zamknięty → (N awarii) → otwarty przez T → półotwarty (jedna próbka) →
-zamknięty albo znów otwarty. W kursie N = 5, T = 30 s. → 08a, ćw. 11.
+**Circuit breaker** — a state machine in front of an unreliable provider: closed → (N failures) → open for T →
+half-open (one probe request) → closed or open again. In the course N = 5, T = 30 s. → 08a, ex. 11.
 
-**Coordinated omission** — błąd pomiaru modelu zamkniętego: generator czeka
-na wolny system, więc nie mierzy żądań, które w prawdziwym ruchu czekałyby w
-kolejce. Zmierzone: p99 1.57 s (zamknięty) vs 4.41 s (otwarty). → 00, ćw. 2.
+**Closed model** — a fixed number of users waiting for a response (k6 `constant-vus`); X = N / (R + Z), it
+slows itself down under load. → 00, ex. 2.
 
-**Czas obsługi (S)** — czas, w którym zasób faktycznie pracuje dla żądania (tu:
-wywołanie LLM); podstawa rachunku pojemności X_max = c / S. → 00, 01a, ćw. 1, 3.
+**Concurrency (L)** — the number of requests in the system at once (waiting and being served). → 00, ex. 3.
 
-**Czekanie (W_q)** — czas, w którym żądanie stoi w kolejce do zasobu (slot,
-połączenie, wątek); niewidoczne w profilu, widoczne w trace i metrykach
-(`llm_queue_wait_seconds`). → 00, ćw. 1, 6.
+**Connection pool** — the set of TCP connections of an HTTP client (`max_connections`,
+`max_keepalive_connections`); smaller than the semaphore, it creates a hidden queue. → 04a, ex. 6.
 
-**Deadline** — bezwzględny limit czasu całego żądania (czekanie + wywołanie +
-ponowienia), po którym wynik traci wartość; w kursie per klasa: 30 s / 330 s.
-→ 08a, 12a, ćw. 10, 12.
+**Coordinated omission** — a measurement error of the closed model: the generator waits for the slow system,
+so it does not measure the requests that would wait in the queue in real traffic. Measured: p99 1.57 s
+(closed) vs 4.41 s (open). → 00, ex. 2.
 
-**Dopływ (λ)** — intensywność przychodzenia żądań; w systemie przeciążonym
-większa niż przepustowość, a różnica trafia do kolejki. → 00, ćw. 2, 3.
+**Deadline** — an absolute time limit for the whole request (wait + call + retries), after which the result
+loses its value; in the course per class: 30 s / 330 s. → 08a, 12a, ex. 10, 12.
 
-**Drain (opróżnianie)** — czas od końca dopływu do pustych kolejek; ≈
-zaległość / pojemność. Przy wywołaniach minutowych liczony w minutach (ćw. 12:
-213–402 s). → 00, 01a, ćw. 12, 18.
+**Disconnect guard** — a task running next to the LLM call that checks `request.is_disconnected()` (in the
+course every 0.5 s); after a disconnect it cancels the call. → 12a, ex. 10.
 
-**`dropped_iterations`** — licznik k6 w modelu otwartym: żądania, których
-generator nie zdążył wysłać o czasie (brak VU); niezerowy = pomiar nieważny.
-→ 00, ćw. 2, 3.
+**Drain** — the time from the end of the inflow to empty queues; ≈ backlog / capacity. For multi-minute calls
+it is counted in minutes (ex. 12: 213–402 s). → 00, 01a, ex. 12, 18.
 
-**Erlang C (M/M/c)** — model kolejki z c serwerami i wspólną kolejką; wzór
-Erlanga C daje prawdopodobieństwo czekania. Więcej serwerów = kolano bliżej
-ρ = 1 i ostrzejsze. → 00, 01a, ćw. 3.
+**`dropped_iterations`** — a k6 counter in the open model: requests the generator did not manage to send on
+time (no VU available); nonzero = invalid measurement. → 00, ex. 2, 3.
 
-**Fallback** — przełączenie na zapasowego dostawcę przy awarii głównego; bez
-wyłącznika każde żądanie płaci timeout martwego dostawcy (zmierzone p50 19.8 s).
-→ 08a, ćw. 11.
+**Erlang C (M/M/c)** — a queue model with c servers and a shared queue; the Erlang C formula gives the
+probability of waiting. More servers = the knee moves closer to ρ = 1 and gets sharper. → 00, 01a, ex. 3.
 
-**GIL** — globalna blokada interpretera CPython: kod Pythona wykonuje naraz
-jeden wątek; czekanie na I/O ją zwalnia. → 04a, ćw. 4, 5.
+**Event loop** — the single asyncio thread that wakes the coroutines that are ready to run; for the code
+between `await`s it is a service center with one server. → 04a, ex. 4.
 
-**`gracefulStop` (k6)** — czas, przez jaki k6 po końcu scenariusza czeka na
-żądania w toku (domyślnie 30 s); krótszy od najdłuższego żądania zrywa
-wielominutowe wywołania i fałszuje drain. → 00, ćw. 10, 12.
+**Event loop lag** — the delay with which the loop runs a scheduled callback; seconds = blocked loop
+(`app_event_loop_lag_seconds`, `/diag`). → 04a, ex. 4.
 
-**gunicorn** — menedżer procesów; `-k sync` = jedno żądanie na proces i
-domyślny `--timeout 30` zabijający worker, `-k uvicorn_worker.UvicornWorker` =
-pętla asyncio w każdym procesie. → 04a, ćw. 7.
+**Fallback** — switching to a backup provider when the primary fails; without a circuit breaker every request
+pays the timeout of the dead provider (measured p50 19.8 s). → 08a, ex. 11.
 
-**Head-of-line blocking** — krótkie żądania czekają za długimi we wspólnej
-kolejce i puli; zmierzone: krótkie czekają p50 29 s przy obsłudze ~1 s.
-→ 01a, ćw. 12.
+**GIL** — CPython's global interpreter lock: only one thread executes Python code at a time; waiting on I/O
+releases it. → 04a, ex. 4, 5.
 
-**Histogram** — metryka z kubełkami wartości; z niego liczysz percentyle
-(`histogram_quantile`). Kubełki muszą sięgać najdłuższych czasów (u atrapy do
-300 s). → 00, ćw. 1, 3.
+**`gracefulStop` (k6)** — how long k6 waits for in-flight requests after the scenario ends (30 s by default);
+shorter than the longest request, it cuts multi-minute calls and falsifies the drain. → 00, ex. 10, 12.
 
-**`http_req_waiting` (k6)** — czas do pierwszego bajtu odpowiedzi; przy SSE =
-czas do nagłówków, więc buforowania strumienia nie widzi. → 12a, ćw. 13.
+**gunicorn** — a process manager; `-k sync` = one request per process and the default `--timeout 30` that
+kills the worker, `-k uvicorn_worker.UvicornWorker` = an asyncio loop in every process. → 04a, ex. 7.
 
-**httpx2** — klient HTTP, na którym stoi SDK `anthropic` 2.x; instrumentacja
-`HTTPX2ClientInstrumentor` daje span `POST` per próba HTTP. Domyślne `Limits`
-100 / 20, w SDK `max_connections=1000`. → 04a, ćw. 1, 6.
+**Head-of-line blocking** — short requests wait behind long ones in a shared queue and pool; measured: short
+requests wait p50 29 s with a service time of ~1 s. → 01a, ex. 12.
 
-**ITPM** — limit tokenów wejścia na minutę; najłatwiej przekraczany dużymi
-wsadami i długimi promptami. → 00, 08a, 14a, ćw. 8, 16.
+**Histogram** — a metric with value buckets; you compute percentiles from it (`histogram_quantile`). The
+buckets must reach the longest times (up to 300 s for the mock). → 00, ex. 1, 3.
 
-**Jitter** — losowe rozrzucenie przerwy przed ponowieniem; pełny jitter:
-U(0, min(limit, baza · 2ⁿ)). Rozbija zsynchronizowane fale ponowień. → 08a, ćw. 9.
+**`http_req_waiting` (k6)** — time to the first byte of the response; for SSE = time to the headers, so it
+does not see stream buffering. → 12a, ex. 13.
 
-**Kolano krzywej** — obszar wykorzystania, w którym czas czekania zaczyna
-rosnąć szybciej niż obciążenie; dla 32 slotów zmierzone ok. 28–30/s. → 00, 01a,
-ćw. 3.
+**httpx2** — the HTTP client underneath the `anthropic` 2.x SDK; the `HTTPX2ClientInstrumentor`
+instrumentation produces a `POST` span per HTTP attempt. Default `Limits` 100 / 20, in the SDK
+`max_connections=1000`. → 04a, ex. 1, 6.
 
-**Kolejka ograniczona** — kolejka o maksymalnej długości K; nadmiar dostaje od
-razu odmowę. K ≈ akceptowalne czekanie × pojemność. → 12a, ćw. 12.
+**ITPM** — the input tokens per minute limit; most easily exceeded with large batches and long prompts.
+→ 00, 08a, 14a, ex. 8, 16.
 
-**Kolejka zadań** — broker (Redis Streams) między producentem (aplikacją) a
-workerem; przesuwa pracę w czasie, nie dodaje mocy. → 14a, ćw. 14.
+**Jitter** — random spreading of the pause before a retry; full jitter: U(0, min(cap, base · 2ⁿ)). It breaks
+up synchronized waves of retries. → 08a, ex. 9.
 
-**Korutyna** — funkcja `async def`; wykonuje się do najbliższego `await`, potem
-oddaje sterowanie pętli. Zawieszona nie zużywa wątku ani CPU. → 04a, ćw. 4.
+**Knee of the curve** — the utilization region where waiting time starts to grow faster than load; for 32
+slots measured at about 28–30/s. → 00, 01a, ex. 3.
 
-**Kubełek z żetonami (token bucket)** — model limitu: kubełek o pojemności =
-limit, stale dopełniany; żądanie zabiera żetony, brak żetonów = 429.
-→ 08a, ćw. 8.
+**Latency (R)** — the response time of a single request = waiting + service; measured on the client and on the
+server side (these are different numbers). → 00.
 
-**Lag kolejki** — liczba wpisów strumienia jeszcze nieodebranych przez grupę
-konsumentów (`XINFO GROUPS`); prawdziwa długość kolejki zadań (`kolejka_lag`).
-→ 14a, ćw. 14.
+**Little's law** — L = λ · W for every stable system and every service center; hence the capacity c / S, the
+pool size λ · S and the measurement consistency check. → 00, 01a, ex. 3, 6, 7, 14.
 
-**Lag pętli zdarzeń** — opóźnienie, z jakim pętla wykonuje zaplanowany
-callback; sekundy = pętla zablokowana (`app_event_loop_lag_seconds`, `/diag`).
-→ 04a, ćw. 4.
+**`llm.queue_wait`** — the span of waiting for the LLM semaphore, a sibling of the `llm.call` span (not its
+parent); plus the `llm.queue.wait_ms` attribute on the request span. → 00, ex. 1.
 
-**Latencja (R)** — czas odpowiedzi jednego żądania = czekanie + obsługa; mierzona
-po stronie klienta i serwera (to różne liczby). → 00.
+**Load shedding** — deliberately and quickly rejecting part of the traffic under overload so that the rest is
+served in a reasonable time. → 12a, ex. 12.
 
-**Limiter tempa** — ograniczenie po stronie klienta dopasowane do limitów
-dostawcy (z nagłówków `anthropic-ratelimit-*`); zamienia 429 w czekanie u nas.
-→ 08a, ćw. 8.
+**`max_retries` (SDK)** — the number of `anthropic` SDK retries, 2 by default (3 attempts), with pauses of
+0.5–8 s and honoring of `retry-after`; set it to 0 when you have your own retry layer. → 08a, ex. 9, 10.
 
-**Little (prawo)** — L = λ · W dla każdego stabilnego systemu i każdej stacji;
-stąd pojemność c / S, rozmiar puli λ · S i kontrola spójności pomiarów.
-→ 00, 01a, ćw. 3, 6, 7, 14.
+**Metastability** — a state in which the system stays overloaded after the cause is gone, because it generates
+the excess itself (for example through retries). → 08a, ex. 9.
 
-**`llm.queue_wait`** — span czekania na semafor LLM, rodzeństwo spanu
-`llm.call` (nie rodzic); plus atrybut `llm.queue.wait_ms` na spanie żądania.
-→ 00, ćw. 1.
+**M/M/1** — the simplest queue model (Poisson arrivals, exponential service, one server); W = S / (1 − ρ): at
+ρ = 0.9 the time in system is 10 × S. → 00, ex. 3.
 
-**Load shedding (odrzucanie nadmiaru)** — świadome, szybkie odrzucanie części
-ruchu przy przeciążeniu, żeby reszta była obsłużona w rozsądnym czasie.
-→ 12a, ćw. 12.
+**Mock LLM** — your own server compatible with the Messages API (port 8061) with repeatable profiles: delays,
+limits, 429/529, streaming, ping, multi-minute calls; two "providers", `a` and `b`. → 00, ex. 1, 8–14, 17.
 
-**`max_retries` (SDK)** — liczba ponowień SDK `anthropic`, domyślnie 2 (3 próby),
-z przerwami 0.5–8 s i honorowaniem `retry-after`; przy własnej warstwie
-ponowień ustaw 0. → 08a, ćw. 9, 10.
+**Multi-minute call** — an LLM call lasting 60–300 s (long TTFT, long stream, pauses); it occupies slots for
+minutes and multiplies the cost of every timeout error and retry. → 00, 01a, 08a, ex. 10, 12.
 
-**Metastabilność** — stan, w którym system zostaje przeciążony po ustąpieniu
-przyczyny, bo sam generuje nadmiar (np. ponowieniami). → 08a, ćw. 9.
+**Network of queues** — a model of a system as service centers connected by flows of requests; the capacity of
+the path is set by its bottleneck. → 00, ex. 4.
 
-**M/M/1** — najprostszy model kolejki (dopływ Poissona, wykładnicza obsługa,
-jeden serwer); W = S / (1 − ρ): przy ρ = 0.9 czas pobytu to 10 × S. → 00, ćw. 3.
+**Open model** — the generator sends at a set rate regardless of responses (k6 `constant-arrival-rate`,
+`ramping-arrival-rate`); it shows queues the way real traffic does. → 00, ex. 2, 3.
 
-**Model otwarty** — generator wysyła w zadanym tempie niezależnie od
-odpowiedzi (k6 `constant-arrival-rate`, `ramping-arrival-rate`); pokazuje
-kolejki tak, jak prawdziwy ruch. → 00, ćw. 2, 3.
+**OTPM** — the output tokens per minute limit; the mock's `limits` profile: 12,000 → 60 summaries of 200
+tokens per minute. → 00, 08a, ex. 8.
 
-**Model zamknięty** — stała liczba użytkowników czekających na odpowiedź (k6
-`constant-vus`); X = N / (R + Z), sam zwalnia pod obciążeniem. → 00, ćw. 2.
+**Pending** — entries delivered to a worker but not acknowledged (`XPENDING`): in progress + prefetched;
+healthy ≈ the worker's concurrency. → 14a, ex. 14.
 
-**Ogon rozkładu** — górne percentyle (p99, max); w aplikacji LLM częściowo
-zaprojektowany (klasa wywołań minutowych), dlatego raportowany per klasa.
-→ 00, ćw. 2, 12.
+**Percentile** — the value below which p% of measurements lie (p50, p99); you must not average percentiles
+across instances. → 00, ex. 2, 3.
 
-**OTPM** — limit tokenów wyjścia na minutę; profil `limity` atrapy: 12 000 →
-60 streszczeń po 200 tokenów na minutę. → 00, 08a, ćw. 8.
+**Ping (SSE)** — an empty stream event sent by the provider (every 15 s in the mock); it resets the read
+timeout during silence; the SDK's `MessageStream` iterator does not return it. → 08a, ex. 10.
 
-**Pending** — wpisy odebrane przez workera, ale niepotwierdzone (`XPENDING`):
-w toku + pobrane na zapas; zdrowo ≈ współbieżność workera. → 14a, ćw. 14.
+**`PoolTimeout`** — exceeding the `pool` timeout while waiting for a connection in the httpx2 pool; in the SDK
+it surfaces as `APITimeoutError` (a subclass of `APIConnectionError`). → 04a, ex. 6.
 
-**Percentyl** — wartość, poniżej której leży p% pomiarów (p50, p99); nie wolno
-uśredniać percentyli między instancjami. → 00, ćw. 2, 3.
+**Prefetch** — a worker pulling tasks in advance (taskiq-redis: `xread_count`); it hides the queue (lag = 0)
+and hoards work in one process. → 14a, ex. 14.
 
-**Pętla zdarzeń** — jedyny wątek asyncio, który budzi korutyny gotowe do
-działania; dla kodu między `await`ami to stacja z jednym serwerem. → 04a, ćw. 4.
+**Profile, CPU vs wall-clock** — a CPU profile samples the threads that are computing, a wall-clock profile
+samples all of them (including those waiting in a blocking call). Neither sees a suspended coroutine.
+→ 00, ex. 4.
 
-**Ping (SSE)** — puste zdarzenie strumienia wysyłane przez dostawcę (w atrapie
-co 15 s); resetuje read timeout podczas ciszy; iterator `MessageStream` SDK go
-nie zwraca. → 08a, ćw. 10.
+**Queue lag** — the number of stream entries not yet delivered to the consumer group (`XINFO GROUPS`); the true
+length of the task queue (`queue_lag`). → 14a, ex. 14.
 
-**Planowanie pojemności** — c = ⌈λ_szczyt · S / ρ_cel⌉ z ρ_cel 0.7–0.8, plus
-sprawdzenie sufitów (limity i moc dostawcy), których slotami nie podniesiesz.
-→ 01a, ćw. 3, 6.
+**Rate limiter** — a client-side limit matched to the provider's limits (from the `anthropic-ratelimit-*`
+headers); it turns a 429 into waiting on our side. → 08a, ex. 8.
 
-**Pojemność (X_max)** — największa utrzymywalna przepustowość stacji: c / S;
-pojemność ścieżki = minimum po stacjach. → 00, 01a, ćw. 3.
+**Read timeout** — a limit on read **inactivity** (every byte resets the clock), not a total limit: a 150 s
+stream with a 30 s read timeout finishes correctly. → 08a, ex. 10.
 
-**`PoolTimeout`** — przekroczenie `pool` timeoutu przy czekaniu na połączenie w
-puli httpx2; w SDK wychodzi jako `APITimeoutError` (podklasa
-`APIConnectionError`). → 04a, ćw. 6.
+**`ReadTimeout` (httpx2)** — the read timeout exception; during a stream the SDK lets it out **raw** (not as
+`APITimeoutError`) and does not retry. → 08a, ex. 10.
 
-**Prefetch** — pobieranie przez workera zadań na zapas (taskiq-redis:
-`xread_count`); ukrywa kolejkę (lag = 0) i zawłaszcza pracę w jednym procesie.
-→ 14a, ćw. 14.
+**RED** — service metrics: Rate, Errors, Duration. → 00, ex. 1, 18.
 
-**Profil CPU vs wall** — profil CPU próbkuje wątki liczące, wall — wszystkie
-(także czekające w blokującym wywołaniu). Zawieszonej korutyny nie widzi żaden.
-→ 00, ćw. 4.
+**Redis Streams** — a log of entries with consumer groups (`XADD`, `XREADGROUP`, `XACK`, `XINFO GROUPS`,
+`XPENDING`); the task queue broker in the course. → 14a, ex. 14.
 
-**Przepustowość (X)** — ile żądań na sekundę system **kończy**; raportuj
-osiągniętą, nie zadaną. → 00, ćw. 2, 4.
+**Request class** — the category of a request by expected duration (`short` / `long`); slots, queues, wait
+budgets and deadlines are set per class, and results are reported per class. → 00, ex. 12.
 
-**Pula połączeń** — zbiór połączeń TCP klienta HTTP (`max_connections`,
-`max_keepalive_connections`); mniejsza niż semafor tworzy ukrytą kolejkę.
-→ 04a, ćw. 6.
+**Response cache** — an LLM result stored under a key for a TTL (in the course the FAQ in Redis); a hit does
+not call the provider: λ_provider = (1 − h) · λ. → 14a, ex. 15.
 
-**Pula wątków** — wątki wykonujące kod synchroniczny poza pętlą; w FastAPI
-ograniczona limiterem anyio (40). → 04a, ćw. 5.
+**Retry amplification** — the ratio of HTTP attempts to the provider to user requests; the layers multiply (3
+application attempts × 3 SDK attempts = up to 9). Measured: 3.65 uncontrolled, 1.20 with a 20% budget.
+→ 08a, ex. 9.
 
-**Read timeout** — limit **bezczynności** odczytu (każdy bajt resetuje zegar),
-nie limit całkowity: strumień 150 s przy read 30 s kończy się poprawnie.
-→ 08a, ćw. 10.
+**Retry budget** — a global limit on retries as a fraction of requests in a window (in the course 20% / 10 s);
+it caps amplification at ×1.2 during a mass outage. → 08a, ex. 9.
 
-**`ReadTimeout` (httpx2)** — wyjątek timeoutu odczytu; w trakcie strumienia SDK
-wypuszcza go **surowo** (nie jako `APITimeoutError`) i nie ponawia. → 08a, ćw. 10.
+**`retry-after`** — a header with the number of seconds until the next attempt; from the provider (429/529) it
+takes precedence over your own backoff, from the application (503) it binds your clients. → 08a, 12a, ex. 8, 9,
+12.
 
-**RED** — metryki usługi: tempo (Rate), błędy (Errors), czas (Duration).
-→ 00, ćw. 1, 18.
+**RPM** — the requests per minute limit at the provider. → 00, 08a, ex. 8.
 
-**Redis Streams** — dziennik wpisów z grupami konsumentów (`XADD`,
-`XREADGROUP`, `XACK`, `XINFO GROUPS`, `XPENDING`); broker kolejki zadań
-w kursie. → 14a, ćw. 14.
+**Semaphore** — `asyncio.Semaphore(n)`: an explicit concurrency limit with a queue of waiters; in the course,
+LLM slots per class with a measured wait time. → 04a, ex. 1, 6, 12.
 
-**`retry-after`** — nagłówek z liczbą sekund do ponownej próby; od dostawcy
-(429/529) ma pierwszeństwo przed własnym backoffem, od aplikacji (503) —
-obowiązuje Twoich klientów. → 08a, 12a, ćw. 8, 9, 12.
+**Server-Timing** — an application response header with the wait time and the LLM call time; k6 computes the
+`app_*` trends from it (for example the wait of short requests). → ex. 2, 12.
 
-**RPM** — limit żądań na minutę u dostawcy. → 00, 08a, ćw. 8.
+**Service center** — a place in the system where requests wait for a resource and are then served (a slot, a
+connection, a thread, the event loop); the unit of the network-of-queues model. → 00, 01a, 04a, 12a.
 
-**Semafor** — `asyncio.Semaphore(n)`: jawny limit współbieżności z kolejką
-czekających; w kursie sloty LLM per klasa z mierzonym czasem czekania.
-→ 04a, ćw. 1, 6, 12.
+**Service time (S)** — the time during which a resource actually works for a request (here: the LLM call); the
+basis of the capacity calculation X_max = c / S. → 00, 01a, ex. 1, 3.
 
-**Server-Timing** — nagłówek odpowiedzi aplikacji z czasem czekania i wywołania
-LLM; z niego k6 liczy trendy `app_*` (np. czekanie krótkich). → ćw. 2, 12.
+**Single-flight** — on a cache miss only the first request computes, the rest wait for its result (an
+`asyncio.Future` within a process, `SET NX PX` in Redis across processes). → 14a, ex. 15.
 
-**Single-flight** — przy chybieniu cache liczy tylko pierwsze żądanie, reszta
-czeka na jego wynik (`asyncio.Future` w procesie, `SET NX PX` w Redisie między
-procesami). → 14a, ćw. 15.
+**SLO (service level objective)** — a measurable target for a service, for example a latency percentile that
+must stay below a threshold; the age of the oldest waiting request is its best early signal.
+→ 00, 12a, ex. 12, 18.
 
-**Slot** — jedno miejsce w limicie współbieżności (semafor, pula); zajęty przez
-cały czas obsługi — przy wywołaniach minutowych przez minuty. → 00, ćw. 6, 12.
+**Slot** — one place in a concurrency limit (semaphore, pool); held for the whole service time — for
+multi-minute calls, for minutes. → 00, ex. 6, 12.
 
-**Span** — odcinek trace z początkiem, końcem, atrybutami i rodzicem; luki
-między spanami to czas, którego nikt nie zarejestrował. → 00, ćw. 1.
+**Socket backlog** — the kernel queue of connections waiting for `accept()`; when it overflows, the client gets
+a dropped connection. Under `gunicorn -k sync` the excess traffic waits there. → 04a, ex. 7.
 
-**SSE (Server-Sent Events)** — strumień zdarzeń tekstowych w jednej odpowiedzi
-HTTP (`text/event-stream`); tak dostawca i aplikacja przesyłają odpowiedź
-kawałkami. → 12a, ćw. 13.
+**Span** — a segment of a trace with a start, an end, attributes and a parent; gaps between spans are time
+nobody recorded. → 00, ex. 1.
 
-**Stan ustalony** — okres, w którym średnie przestały się zmieniać; przychodzi
-po kilku W (przy analizach — po minutach); przy λ > X_max nie istnieje.
-→ 01a, ćw. 3, 12.
+**SSE (Server-Sent Events)** — a stream of text events in a single HTTP response (`text/event-stream`); this is
+how the provider and the application send a response in pieces. → 12a, ex. 13.
 
-**Strażnik rozłączenia** — zadanie obok wywołania LLM sprawdzające
-`request.is_disconnected()` (w kursie co 0.5 s); po rozłączeniu anuluje
-wywołanie. → 12a, ćw. 10.
+**Steady state** — a period in which the averages have stopped changing; it arrives after several W (for
+analyses — after minutes); at λ > X_max it does not exist. → 01a, ex. 3, 12.
 
-**Streaming buforowany** — ktoś po drodze zbiera fragmenty strumienia i wysyła
-je na końcu; TTFT dostawcy OK, klient czeka na całość (zmierzone: 100% czasu
-vs 19%). → 12a, ćw. 13, 18.
+**Streaming, buffered** — something on the way collects the stream chunks and sends them at the end; the
+provider's TTFT is fine, the client waits for everything (measured: 100% of the time vs 19%).
+→ 12a, ex. 13, 18.
 
-**taskiq** — biblioteka kolejki zadań z zadaniami `async def`; współbieżność
-workera = `--workers` × `--max-async-tasks` (domyślnie 2 × 100). → 14a, ćw. 14.
+**Tail of the distribution** — the upper percentiles (p99, max); in an LLM application partly by design (the
+class of multi-minute calls), which is why it is reported per class. → 00, ex. 2, 12.
 
-**Timeout k6** — domyślny limit czasu żądania w k6: 60 s; testy wielominutowe
-muszą ustawiać `params.timeout` (inaczej `status 0` po 60 s). → 08a, ćw. 10, 12.
+**Task queue** — a broker (Redis Streams) between the producer (the application) and the worker; it shifts
+work in time, it does not add capacity. → 14a, ex. 14.
 
-**Tokeny/s** — tempo generacji po pierwszym tokenie (realnie ~225–300, atrapa
-250); czas całkowity ≈ TTFT + tokeny / tempo. → 00, ćw. 17.
+**taskiq** — a task queue library with `async def` tasks; worker concurrency = `--workers` ×
+`--max-async-tasks` (default 2 × 100). → 14a, ex. 14.
 
-**Trace** — drzewo spanów jednego żądania; pokazuje, gdzie żądanie spędziło
-czas, łącznie z czekaniem. → 00, ćw. 1.
+**Thread pool** — the threads that run synchronous code outside the loop; in FastAPI limited by the anyio
+limiter (40). → 04a, ex. 5.
 
-**TTFT (time to first token)** — czas do pierwszego fragmentu odpowiedzi;
-inny u dostawcy (`llm_ttft_seconds`), inny wysłany klientowi
-(`app_stream_first_chunk_seconds`), inny u klienta. → 00, 12a, ćw. 10, 13, 17.
+**Throughput (X)** — how many requests per second the system **completes**; report the achieved rate, not the
+target rate. → 00, ex. 2, 4.
 
-**USE** — metryki zasobu: zajętość (Utilization), nasycenie (Saturation), błędy
-(Errors). → 00, ćw. 6, 18.
+**Timeout budget** — arranging the clocks from the inside out: SDK timeouts (inactivity) < application
+deadline (per class) < timeouts of the outer layers (proxy, k6). → 08a, ex. 10.
 
-**UvicornWorker** — worker gunicorna (`uvicorn_worker.UvicornWorker`) z pętlą
-asyncio; timeout gunicorna nie przerywa jego żądań (zmierzone: 90 s → 200).
-→ 04a, ćw. 7.
+**Timeout, k6** — the default request time limit in k6: 60 s; multi-minute tests must set `params.timeout`
+(otherwise `status 0` after 60 s). → 08a, ex. 10, 12.
 
-**Wąskie gardło** — stacja o najmniejszej pojemności na ścieżce; tylko jej
-poszerzenie zwiększa przepustowość. → 01a, ćw. 6, 8.
+**Token bucket** — a limit model: a bucket with capacity = the limit, constantly refilled; a request takes
+tokens, no tokens = 429. → 08a, ex. 8.
 
-**Wiek najstarszego** — jak długo czeka najstarsze żądanie / zadanie
-(`llm_oldest_waiting_age_seconds`, `kolejka_wiek_najstarszego_s`,
-`mock_llm_oldest_inflight_seconds`); najlepszy sygnał SLO kolejki.
-→ 00, 14a, ćw. 12, 14.
+**Tokens/s** — the generation speed after the first token (in reality ~225–300, the mock 250); total time ≈
+TTFT + tokens / speed. → 00, ex. 17.
 
-**`WORKER TIMEOUT`** — komunikat gunicorna po zabiciu workera sync, który nie
-odpowiedział w `--timeout` (domyślnie 30 s); klient dostaje 500. → 04a, ćw. 7.
+**Trace** — the tree of spans of a single request; it shows where the request spent its time, including
+waiting. → 00, ex. 1.
 
-**Współbieżność (L)** — liczba żądań w systemie naraz (czekających i
-obsługiwanych). → 00, ćw. 3.
+**TTFT (time to first token)** — the time to the first chunk of the response; different at the provider
+(`llm_ttft_seconds`), different as sent to the client (`app_stream_first_chunk_seconds`), different at the
+client. → 00, 12a, ex. 10, 13, 17.
 
-**Wykorzystanie (ρ)** — odsetek czasu pracy serwerów stacji: ρ = λ · S / c;
-czekanie rośnie jak 1 / (1 − ρ). → 00, 01a, ćw. 3.
+**USE** — resource metrics: Utilization, Saturation, Errors. → 00, ex. 6, 18.
 
-**Wywołanie wielominutowe** — wywołanie LLM trwające 60–300 s (długi TTFT,
-długi strumień, pauzy); zajmuje sloty minutami i mnoży koszt każdego błędu
-timeoutu i ponowienia. → 00, 01a, 08a, ćw. 10, 12.
+**Utilization (ρ)** — the fraction of time the servers of a service center are busy: ρ = λ · S / c; waiting
+grows like 1 / (1 − ρ). → 00, 01a, ex. 3.
 
-**XLEN** — liczba wpisów w strumieniu Redis; taskiq nie usuwa wpisów, więc
-XLEN ≠ długość kolejki (patrz: lag kolejki). → 14a, ćw. 14.
+**UvicornWorker** — a gunicorn worker (`uvicorn_worker.UvicornWorker`) with an asyncio loop; the gunicorn
+timeout does not interrupt its requests (measured: 90 s → 200). → 04a, ex. 7.
 
-**Zaległość** — liczba żądań czekających i w toku w chwili końca dopływu;
-raportowana razem z wiekiem najstarszego i czasem drain. → 00, ćw. 12, 18.
+**Wait budget** — the longest time a request of a given class may wait for a slot (in the course 5 s / 20 s);
+after that it gets a 503 instead of waiting further. → 12a, ex. 12.
+
+**Waiting time (W_q)** — the time a request stands in the queue for a resource (slot, connection, thread);
+invisible in a profile, visible in the trace and metrics (`llm_queue_wait_seconds`). → 00, ex. 1, 6.
+
+**Wasted work** — work nobody is waiting for any more (for example an LLM call whose client has disconnected);
+cancellation and disconnect guards exist to eliminate it. → 01a, 12a, ex. 12, 18.
+
+**`WORKER TIMEOUT`** — the gunicorn message after killing a sync worker that did not respond within
+`--timeout` (30 s by default); the client gets a 500. → 04a, ex. 7.
+
+**XLEN** — the number of entries in a Redis stream; taskiq does not delete entries, so XLEN ≠ queue length
+(see: queue lag). → 14a, ex. 14.

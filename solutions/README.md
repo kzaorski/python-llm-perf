@@ -1,58 +1,59 @@
-# solutions/ — rozwiązania kumulatywne
+# solutions/ — cumulative solutions
 
-Każdy plik `exNN_<moduł>.*` to **pełna** wersja modułu po ćwiczeniu NN (zawiera też wcześniejsze zmiany
-tego modułu). Kopiowanie odblokowuje Cię na danym etapie — to ostatni szczebel drabinki, po podpowiedziach
-z `solutions/hints/`.
+Each `exNN_<module>.*` file is the **full** version of a module after exercise NN (it also contains the earlier
+changes to that module). Copying it unblocks you at that stage — it is the last rung of the ladder, after the
+hints in `solutions/hints/`.
 
 ```bash
-cp solutions/ex06_limiter.py app/llm/limiter.py      # stan modułu po ćw. 06 (zawiera ćw. 01)
+cp solutions/ex06_limiter.py app/llm/limiter.py      # the module's state after ex. 06 (includes ex. 01)
 ```
 
-| Plik | Kopiuj do | Ćw. | Wada |
+| File | Copy to | Ex. | Flaw |
 |---|---|---|---|
-| `ex01_limiter.py` | `app/llm/limiter.py` | 01 | (TODO: pomiar czekania na slot) |
-| `ex02_otwarty.js` | `k6/otwarty.js` | 02 | W14 model zamknięty zaniża ogon |
-| `ex04_klasyfikacja.py` | `app/klasyfikacja.py` | 04 | W1 synchroniczny klient w `async def` |
-| `ex05_szablony.py` | `app/szablony.py` | 05 | W2 pula wątków anyio (40) |
-| `ex06_limiter.py` | `app/llm/limiter.py` | 06 (+01) | W3 za mało slotów |
-| `ex07_gunicorn.py` | `gunicorn.conf.py` | 07 | W13 workery sync / 2×CPU+1 |
-| `ex08_limiter.py` | `app/llm/limiter.py` | 08 (+01, 06) | W4 brak limitera tempa → 429 |
-| `ex09_klient.py`, `ex09_ponowienia.py` | `app/llm/klient.py`, `app/llm/ponowienia.py` | 09 | W5 ponowienia SDK × aplikacji |
-| `ex10_klient.py`, `ex10_wywolanie.py` | `app/llm/klient.py`, `app/llm/wywolanie.py` | 10 (+09) | W6, W16, W17 timeouty / deadline / anulowanie |
-| `ex11_fallback.py` | `app/llm/fallback.py` | 11 | W12 fallback bez wyłącznika |
-| `ex12_limiter.py`, `ex12_przeciazenie.py` | `app/llm/limiter.py`, `app/przeciazenie.py` | 12 (+01, 06, 08) | W7, W8, W18 |
-| `ex13_strumien.py` | `app/strumien.py` | 13 | W9 buforowany strumień |
-| `ex14_zadania.py`, `ex14_kolejka_metryki.py` | `app/zadania.py`, `app/kolejka_metryki.py` | 14 | W15 współbieżność/prefetch workera |
-| `ex15_cache.py` | `app/cache.py` | 15 | W10 cache stampede |
-| `ex16_wsad.py` | `app/wsad.py` | 16 | W11 okno i rozmiar wsadu |
+| `ex01_limiter.py` | `app/llm/limiter.py` | 01 | (TODO: measuring the slot wait) |
+| `ex02_open_model.js` | `k6/open_model.js` | 02 | F14 the closed model understates the tail |
+| `ex04_classification.py` | `app/classification.py` | 04 | F1 synchronous client in `async def` |
+| `ex05_templates.py` | `app/templates.py` | 05 | F2 anyio thread pool (40) |
+| `ex06_limiter.py` | `app/llm/limiter.py` | 06 (+01) | F3 too few slots |
+| `ex07_gunicorn.py` | `gunicorn.conf.py` | 07 | F13 sync workers / 2×CPU+1 |
+| `ex08_limiter.py` | `app/llm/limiter.py` | 08 (+01, 06) | F4 no rate limiter → 429 |
+| `ex09_client.py`, `ex09_retries.py` | `app/llm/client.py`, `app/llm/retries.py` | 09 | F5 SDK × application retries |
+| `ex10_client.py`, `ex10_call.py` | `app/llm/client.py`, `app/llm/call.py` | 10 (+09) | F6, F16, F17 timeouts / deadline / cancellation |
+| `ex11_fallback.py` | `app/llm/fallback.py` | 11 | F12 fallback without a circuit breaker |
+| `ex12_limiter.py`, `ex12_overload.py` | `app/llm/limiter.py`, `app/overload.py` | 12 (+01, 06, 08) | F7, F8, F18 |
+| `ex13_stream.py` | `app/stream.py` | 13 | F9 buffered stream |
+| `ex14_tasks.py`, `ex14_queue_metrics.py` | `app/tasks.py`, `app/queue_metrics.py` | 14 | F15 worker concurrency/prefetch |
+| `ex15_cache.py` | `app/cache.py` | 15 | F10 cache stampede |
+| `ex16_batch.py` | `app/batch.py` | 16 | F11 batch window and size |
 
-Ćw. 03 (prawo Little'a, `k6/rampa.js`) i 17 (atrapa vs Claude, `scripts/porownaj_z_claude.py`) nie zmieniają
-kodu aplikacji. `app/main.py` nie jest zmieniany w żadnym ćwiczeniu, więc nie ma pliku `*_fragmenty`.
+Ex. 03 (Little's law, `k6/ramp.js`) and 17 (mock vs Claude, `scripts/compare_with_claude.py`) do not change the
+application code. `app/main.py` is not changed in any exercise, so there is no `*_fragments` file.
 
-## Stan „po ćwiczeniu NN" bez kopiowania
+## The state "after exercise NN" without copying
 
-`scripts/nakladka.py --do NN` składa kopię aplikacji w `.run/do-NN/` (Twoje `app/` zostaje nietknięte):
+`scripts/overlay.py --after NN` assembles a copy of the application in `.run/after-NN/` (your `app/` stays
+untouched):
 
 ```bash
-python scripts/nakladka.py --do 12
-uvicorn --app-dir .run/do-12 app.main:app --port 8060
+python scripts/overlay.py --after 12
+uvicorn --app-dir .run/after-12 app.main:app --port 8060
 ```
 
-Na tym stoją `./smoke.sh` (regresja `check.py --all` na rozwiązaniach) i `./incydent.sh` (finał).
+`./smoke.sh` (the `check.py --all` regression on the solutions) and `./incident.sh` (the final) are built on it.
 
-## Utknąłeś? Kolejność ratunku
+## Stuck? The rescue order
 
-1. `hints/exNN_hint1.md` — kierunek (bez kodu),
-2. `hints/exNN_hint2.md` — które API / metryka / zapytanie,
-3. `hints/exNN_hint3.md` — pseudokod,
-4. dopiero potem: skopiuj gotowy moduł (tabela powyżej) albo uruchom stan „po ćwiczeniu NN” (`nakladka.py`).
+1. `hints/exNN_hint1.md` — direction (no code),
+2. `hints/exNN_hint2.md` — which API / metric / query,
+3. `hints/exNN_hint3.md` — pseudocode,
+4. only then: copy the ready-made module (the table above) or run the state "after exercise NN" (`overlay.py`).
 
-Podpowiedzi są dla wszystkich 18 ćwiczeń (także 03 i 17, które nie zmieniają kodu, i dla finału 18).
+Hints exist for all 18 exercises (also 03 and 17, which do not change code, and for the final, 18).
 
-## Pozostałe pliki
+## Other files
 
-- `pytania_odpowiedzi.md` — klucz do pytań kontrolnych ćw. 01–18 i do mini-incydentów I–IV; zaglądaj PO
-  własnej próbie odpowiedzi.
-- `ex18_odpowiedzi.md` — klucz do finału (objaw → ślad → przyczyna → naprawa dla każdej usterki, interakcje,
-  wykluczenia) + rubryka samooceny. Otwórz dopiero PO napisaniu własnego raportu.
-- `todo.md` — pomysły na rozszerzenia kursu (kolejne wady i ćwiczenia).
+- `questions_answers.md` — the key to the review questions of ex. 01–18 and to mini-incidents I–IV; look at it
+  AFTER you have tried to answer yourself.
+- `ex18_answers.md` — the key to the final (symptom → evidence → cause → fix for every defect, interactions,
+  exclusions) + the self-assessment rubric. Open it only AFTER you have written your own report.
+- `todo.md` — ideas for extending the course (more flaws and exercises).

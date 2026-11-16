@@ -1,64 +1,65 @@
-# Spis ćwiczeń i czytanek — python-llm-perf
+# Index of exercises and readings — python-llm-perf
 
-Kolejność jest progresywna — każde ćwiczenie buduje na poprzednim (stan aplikacji „po ćw. NN” możesz też
-złożyć skryptem `scripts/nakladka.py --do NN`). Czytanki teoretyczne (bez zadań) poprzedzają bloki, których
-dotyczą. Po każdym bloku jest mini-incydent: jedna wada, diagnoza bez czytania kodu (`./incydent.sh`).
+The order is progressive — every exercise builds on the previous one (you can also assemble the application's
+state "after ex. NN" with the script `scripts/overlay.py --after NN`). The theory readings (no tasks) come
+before the blocks they cover. After each block there is a mini-incident: one flaw, diagnosed without reading
+the code (`./incident.sh`).
 
-## Mapa umiejętności
+## Skills map
 
-Po ukończeniu kursu umiesz:
-- czytać trace żądania LLM: czekanie na slot vs obsługa vs TTFT; RED w Grafanie (ćw. 01)
-- rozpoznać model zamknięty generatora i coordinated omission; dobrać executor k6 (ćw. 02)
-- wyznaczyć pojemność z prawa Little'a i znaleźć kolano krzywej wykorzystanie → czekanie (ćw. 03)
-- wykryć blokadę pętli zdarzeń od strony systemu: przepustowość, kolejka, p99 w ruchu otwartym (ćw. 04)
-- wykryć wyczerpanie puli wątków anyio (40) — czekanie bez CPU (ćw. 05)
-- wykryć za mało slotów / za małą pulę połączeń — czekanie na slot, PoolTimeout (ćw. 06)
-- dobrać model procesów gunicorna (sync vs UvicornWorker) i liczbę procesów (ćw. 07)
-- odczytać limity dostawcy (429, `anthropic-ratelimit-*`) i ograniczyć tempo po swojej stronie (ćw. 08)
-- rozpoznać burzę ponowień (SDK × aplikacja, brak jittera) i zmierzyć amplifikację (ćw. 09)
-- ustawić budżet timeoutów dla wywołań sekundowych i wielominutowych: read ≠ deadline, anulowanie po
-  rozłączeniu, ping a bezczynność, timeouty k6/gunicorna (ćw. 10)
-- zbudować fallback z wyłącznikiem (stany, półotwarcie) (ćw. 11)
-- wprowadzić backpressure i odrzucanie nadmiaru; rozdzielić pule krótkich i wielominutowych (ćw. 12)
-- mierzyć TTFT end-to-end i wykryć buforowanie strumienia, którego k6 nie widzi (ćw. 13)
-- obserwować kolejkę zadań (lag, wiek najstarszego) i dobrać współbieżność workera (ćw. 14)
-- wykryć cache stampede i naprawić go single-flightem (ćw. 15)
-- dobrać okno i rozmiar wsadu, mierząc oba końce (ćw. 16)
-- skalibrować model pojemności na prawdziwym API (ćw. 17, opcjonalnie płatne)
-- zdiagnozować złożony incydent z kilkoma wadami naraz (ćw. 18)
+After completing the course you can:
+- read the trace of an LLM request: slot wait vs service vs TTFT; RED in Grafana (ex. 01)
+- recognize the generator's closed model and coordinated omission; choose a k6 executor (ex. 02)
+- derive capacity from Little's law and find the knee of the utilization → waiting curve (ex. 03)
+- detect event loop blocking from the system's side: throughput, queue, p99 in open-model traffic (ex. 04)
+- detect exhaustion of the anyio thread pool (40) — waiting without CPU (ex. 05)
+- detect too few slots / too small a connection pool — slot wait, PoolTimeout (ex. 06)
+- choose gunicorn's process model (sync vs UvicornWorker) and the number of processes (ex. 07)
+- read the provider's limits (429, `anthropic-ratelimit-*`) and limit the rate on your side (ex. 08)
+- recognize a retry storm (SDK × application, no jitter) and measure the amplification (ex. 09)
+- set a timeout budget for second-long and multi-minute calls: read ≠ deadline, cancellation on disconnect,
+  ping vs inactivity, k6/gunicorn timeouts (ex. 10)
+- build a fallback with a circuit breaker (states, half-open) (ex. 11)
+- introduce backpressure and load shedding; separate the pools of short and multi-minute calls (ex. 12)
+- measure end-to-end TTFT and detect stream buffering that k6 does not see (ex. 13)
+- observe a task queue (lag, age of the oldest) and tune the worker's concurrency (ex. 14)
+- detect a cache stampede and fix it with single-flight (ex. 15)
+- choose the batch window and size by measuring both ends (ex. 16)
+- calibrate the capacity model on the real API (ex. 17, optional and paid)
+- diagnose a complex incident with several flaws at once (ex. 18)
 
-## Ćwiczenia
+## Exercises
 
-| # | Plik | Czas | Co robisz |
+| # | File | Time | What you do |
 |---|---|---|---|
-| — | `exercises/00-teoria.md` | ~60 min | **Czytanka:** kolejki, prawo Little'a, kolano, model otwarty/zamknięty, RED/USE, LLM i wywołania minutowe (przeczytaj pierwsze) |
-| — | `exercises/01a-teoria-kolejek-w-praktyce.md` | ~30 min | **Czytanka:** teoria kolejek w praktyce (przed blokiem I) |
-| 1 | `exercises/01-pierwszy-trace.md` | ~45 min | Start stosu, pierwszy trace; span `llm.queue_wait`, czekanie w metrykach |
-| 2 | `exercises/02-model-otwarty-vs-zamkniety.md` | ~40 min | k6: model otwarty vs zamknięty, coordinated omission (W14) |
-| 3 | `exercises/03-prawo-littlea-pojemnosc.md` | ~45 min + ~20 | Rampa, prawo Little'a, kolano krzywej; **mini-incydent I** |
-| — | `exercises/04a-asyncio-petla-i-pule.md` | ~30 min | **Czytanka:** asyncio, pętla zdarzeń i pule (przed blokiem II) |
-| 4 | `exercises/04-sync-klient-w-async.md` | ~45 min | Synchroniczny klient w `async def` — skutek systemowy (W1) |
-| 5 | `exercises/05-pula-watkow-anyio.md` | ~30 min | Pula wątków anyio 40 (W2) |
-| 6 | `exercises/06-pula-slotow-i-polaczen.md` | ~45 min | Za mało slotów / pula połączeń, PoolTimeout (W3) |
-| 7 | `exercises/07-gunicorn-model-procesow.md` | ~45 min + ~20 | gunicorn sync vs UvicornWorker (W13); **mini-incydent II** |
-| — | `exercises/08a-limity-retry-timeouty.md` | ~30 min | **Czytanka:** limity, ponowienia, timeouty, fallback (przed blokiem III) |
-| 8 | `exercises/08-limity-dostawcy.md` | ~45 min | 429, nagłówki limitów, limiter tempa (W4) |
-| 9 | `exercises/09-burza-ponowien.md` | ~40 min | Burza ponowień, jitter, budżet (W5) |
-| 10 | `exercises/10-timeouty-i-deadline.md` | ~80 min | Timeouty, deadline, anulowanie — testy wielominutowe (W6, W16, W17) |
-| 11 | `exercises/11-fallback-wylacznik.md` | ~40 min + ~20 | Fallback z wyłącznikiem (W12); **mini-incydent III** |
-| — | `exercises/12a-backpressure-i-streaming.md` | ~30 min | **Czytanka:** backpressure, odrzucanie, streaming (przed blokiem IV) |
-| 12 | `exercises/12-backpressure-odrzucanie.md` | ~90 min | Ruch mieszany sekundy + minuty, 3-min dopływ + drain (W7, W8, W18) |
-| 13 | `exercises/13-streaming-ttft.md` | ~40 min + ~20 | TTFT u klienta, buforowanie strumienia (W9); **mini-incydent IV** |
-| — | `exercises/14a-kolejki-zadan-cache-batching.md` | ~25 min | **Czytanka:** kolejki zadań, cache, batching (przed blokiem V) |
-| 14 | `exercises/14-kolejka-zadan-worker.md` | ~50 min | taskiq: metryki kolejki, współbieżność i prefetch workera (W15) |
-| 15 | `exercises/15-cache-stampede.md` | ~30 min | Cache stampede, single-flight (W10) |
-| 16 | `exercises/16-batching.md` | ~35 min | Okno i rozmiar wsadu (W11) |
-| 17 | `exercises/17-atrapa-vs-claude.md` | ~30 min | Atrapa vs prawdziwy Claude (opcjonalnie, ≈ $0.005; bez klucza `--tylko-atrapa`) |
-| 18 | `exercises/18-final-incydent.md` | ~90 min | **Finał:** incydent z kilkoma wadami naraz, diagnoza bez kodu, raport |
+| — | `exercises/00-theory.md` | ~60 min | **Reading:** queues, Little's law, the knee, open/closed model, RED/USE, LLMs and minute-long calls (read first) |
+| — | `exercises/01a-queueing-theory-in-practice.md` | ~30 min | **Reading:** queueing theory in practice (before Block I) |
+| 1 | `exercises/01-first-trace.md` | ~45 min | Start the stack, the first trace; the `llm.queue_wait` span, waiting in metrics |
+| 2 | `exercises/02-open-vs-closed-model.md` | ~40 min | k6: open vs closed model, coordinated omission (F14) |
+| 3 | `exercises/03-littles-law-capacity.md` | ~45 min + ~20 | Ramp, Little's law, the knee of the curve; **mini-incident I** |
+| — | `exercises/04a-asyncio-loop-and-pools.md` | ~30 min | **Reading:** asyncio, the event loop and pools (before Block II) |
+| 4 | `exercises/04-sync-client-in-async.md` | ~45 min | A synchronous client in `async def` — the system-level effect (F1) |
+| 5 | `exercises/05-anyio-thread-pool.md` | ~30 min | The anyio thread pool of 40 (F2) |
+| 6 | `exercises/06-slot-and-connection-pools.md` | ~45 min | Too few slots / connection pool, PoolTimeout (F3) |
+| 7 | `exercises/07-gunicorn-process-model.md` | ~45 min + ~20 | gunicorn sync vs UvicornWorker (F13); **mini-incident II** |
+| — | `exercises/08a-limits-retries-timeouts.md` | ~30 min | **Reading:** limits, retries, timeouts, fallback (before Block III) |
+| 8 | `exercises/08-provider-limits.md` | ~45 min | 429, limit headers, rate limiter (F4) |
+| 9 | `exercises/09-retry-storm.md` | ~40 min | Retry storm, jitter, budget (F5) |
+| 10 | `exercises/10-timeouts-and-deadlines.md` | ~80 min | Timeouts, deadline, cancellation — multi-minute tests (F6, F16, F17) |
+| 11 | `exercises/11-fallback-circuit-breaker.md` | ~40 min + ~20 | Fallback with a circuit breaker (F12); **mini-incident III** |
+| — | `exercises/12a-backpressure-and-streaming.md` | ~30 min | **Reading:** backpressure, load shedding, streaming (before Block IV) |
+| 12 | `exercises/12-backpressure-load-shedding.md` | ~90 min | Mixed traffic of seconds and minutes, 3-min inflow + drain (F7, F8, F18) |
+| 13 | `exercises/13-streaming-ttft.md` | ~40 min + ~20 | Client-side TTFT, stream buffering (F9); **mini-incident IV** |
+| — | `exercises/14a-task-queues-cache-batching.md` | ~25 min | **Reading:** task queues, cache, batching (before Block V) |
+| 14 | `exercises/14-task-queue-worker.md` | ~50 min | taskiq: queue metrics, worker concurrency and prefetch (F15) |
+| 15 | `exercises/15-cache-stampede.md` | ~30 min | Cache stampede, single-flight (F10) |
+| 16 | `exercises/16-batching.md` | ~35 min | Batch window and size (F11) |
+| 17 | `exercises/17-mock-vs-claude.md` | ~30 min | Mock vs real Claude (optional, ≈ $0.005; without a key `--mock-only`) |
+| 18 | `exercises/18-final-incident.md` | ~90 min | **Final:** an incident with several flaws at once, diagnosis without code, report |
 
-Łącznie: ćwiczenia z mini-incydentami ~16 h, czytanki ~3.5 h (czasy czytanek to szacunek lektury).
-Najdłuższe ćwiczenia (10, 12, 18) zawierają prawdziwe testy wielominutowe — nie skracaj ich profilem
-sekundowym, on służy tylko do szybkiego podglądu.
+In total: the exercises with mini-incidents ~16 h, the readings ~3.5 h (the reading times are an estimate of
+reading time). The longest exercises (10, 12, 18) contain real multi-minute tests — do not shorten them with the
+second-long profile, which is only for a quick preview.
 
-Pojęcia w pigułce: `slownik.md`. Rozwiązania i podpowiedzi: katalog `solutions/` (`solutions/README.md`).
-Weryfikacja „done”: `python check.py exNN` (albo `python check.py --all`).
+Concepts in a nutshell: `glossary.md`. Solutions and hints: the `solutions/` directory (`solutions/README.md`).
+"Done" verification: `python check.py exNN` (or `python check.py --all`).
